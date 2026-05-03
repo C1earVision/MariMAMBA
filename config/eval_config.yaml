@@ -1,0 +1,16 @@
+evaluation:
+  num_samples_per_target: 10
+  columns_per_level: 64
+  temperature: 0.8
+  top_k: 20
+  top_p: 1.2
+  cfg_scale: 1.3
+  target_attributes: 
+    - [0, 0, 0]
+    - [2, 0, 0]
+    - [5, 0, 0]
+    - [0, 3, 0]
+    - [0, 0, 3]
+    - [3, 2, 2]
+
+  evaluation_path: 'output/visualizations/attribute_evaluation.png'

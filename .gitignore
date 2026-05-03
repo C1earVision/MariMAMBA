@@ -1,0 +1,9 @@
+checkpoints/*
+output/generated_levels/*
+output/processed/*
+output/visualizations/*
+
+!checkpoints/.gitkeep
+!output/generated_levels/.gitkeep
+!output/processed/.gitkeep
+!output/visualizations/.gitkeep

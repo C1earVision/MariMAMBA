@@ -315,6 +315,7 @@ class Mamba(nn.Module):
         print(f"  Model dim:    {self.d_model}")
         print(f"  Layers:       {self.n_layers}")
         print(f"  Max seq len:  {self.max_seq_len}")
+        print(f"  Columns per token:  {self.columns_per_token}")
         print(f"  Parameters:   {total:,}  (trainable: {trainable:,})")
         print(f"{'='*70}\n")
 

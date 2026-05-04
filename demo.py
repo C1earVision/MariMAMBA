@@ -371,7 +371,7 @@ with gr.Blocks(title="Mario Level Studio") as demo:
             gr.HTML('<div class="section-label">⚙ Generation Parameters</div>')
 
             enemies = gr.Slider(
-                minimum=0, maximum=15, step=1, value=3,
+                minimum=0, maximum=15, step=1, value=0,
                 label="Enemies (Target Count)",
             )
             gaps = gr.Slider(
@@ -387,15 +387,15 @@ with gr.Blocks(title="Mario Level Studio") as demo:
                 label="Temperature  (higher=more random)",
             )
             top_k = gr.Slider(
-                minimum=0, maximum=100, step=1, value=20,
+                minimum=0, maximum=100, step=1, value=30,
                 label="Top-K  (0=disabled)",
             )
             top_p = gr.Slider(
-                minimum=0.1, maximum=1.0, step=0.05, value=0.9,
-                label="Top-P  (1.0=disabled)",
+                minimum=0.1, maximum=1.5, step=0.05, value=1.5,
+                label="Top-P  (>1.0 = disabled)",
             )
             cfg_scale = gr.Slider(
-                minimum=1.0, maximum=10.0, step=0.5, value=3.0,
+                minimum=1.0, maximum=10.0, step=0.5, value=1.5,
                 label="CFG Scale  (1.0=no guidance)",
             )
             num_columns = gr.Slider(

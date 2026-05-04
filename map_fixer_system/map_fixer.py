@@ -545,15 +545,18 @@ def generate_level(attributes: List[float], patches: int, seed: int | None = Non
 #  RENDERER
 # ══════════════════════════════════════════════════════════════════════════
 
-from mario_gpt import MarioLM
-from mario_gpt.utils import view_level, convert_level_to_png
-mario_lm = MarioLM()
-
-
+# Global for lazy loading
+_mario_lm_cache = None
 
 def render_level(grid, **kwargs):
+    global _mario_lm_cache
+    if _mario_lm_cache is None:
+        from mario_gpt import MarioLM
+        _mario_lm_cache = MarioLM()
+    
+    from mario_gpt.utils import convert_level_to_png
     row_list = ["".join(row) for row in grid]
-    img, _, _ = convert_level_to_png(row_list, mario_lm.tokenizer)
+    img, _, _ = convert_level_to_png(row_list, _mario_lm_cache.tokenizer)
     return img
 
 

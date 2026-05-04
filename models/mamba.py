@@ -146,15 +146,17 @@ class ColumnEncoder(nn.Module):
         column_height: int = 14,
         tile_embed_dim: int = 8,
         d_model: int = 128,
+        columns_per_token: int = 1,
     ):
         super().__init__()
         self.num_tile_types = num_tile_types
         self.column_height = column_height
+        self.columns_per_token = columns_per_token
         self.tile_embed_dim = tile_embed_dim
         self.d_model = d_model
 
         self.tile_embedding = nn.Embedding(num_tile_types, tile_embed_dim)
-        flat_dim = column_height * tile_embed_dim
+        flat_dim = column_height * columns_per_token * tile_embed_dim
 
         self.projection = nn.Sequential(
             nn.Linear(flat_dim, d_model),
@@ -162,11 +164,11 @@ class ColumnEncoder(nn.Module):
             nn.Linear(d_model, d_model),
         )
 
-    def forward(self, columns: torch.Tensor) -> torch.Tensor:
-
-        B, L, H = columns.shape
-        tile_embs = self.tile_embedding(columns)
-        flat = tile_embs.reshape(B, L, H * self.tile_embed_dim)
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        # tokens: [B, L, H_eff] where H_eff = column_height * columns_per_token
+        B, L, Heff = tokens.shape
+        tile_embs = self.tile_embedding(tokens) # [B, L, Heff, tile_embed_dim]
+        flat = tile_embs.reshape(B, L, Heff * self.tile_embed_dim)
         return self.projection(flat)
 
 
@@ -176,22 +178,24 @@ class ColumnDecoder(nn.Module):
         num_tile_types: int = 13,
         column_height: int = 14,
         d_model: int = 128,
+        columns_per_token: int = 1,
     ):
         super().__init__()
         self.num_tile_types = num_tile_types
         self.column_height = column_height
+        self.columns_per_token = columns_per_token
 
         self.head = nn.Sequential(
             nn.Linear(d_model, d_model),
             nn.SiLU(),
-            nn.Linear(d_model, column_height * num_tile_types),
+            nn.Linear(d_model, column_height * columns_per_token * num_tile_types),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-
         B, L, D = x.shape
         out = self.head(x)
-        return out.reshape(B, L, self.column_height, self.num_tile_types)
+        # Reshape to [B, L, K*H, num_tile_types]
+        return out.reshape(B, L, self.column_height * self.columns_per_token, self.num_tile_types)
 
 
 class Mamba(nn.Module):
@@ -209,11 +213,13 @@ class Mamba(nn.Module):
         dropout: float = 0.1,
         max_seq_len: int = 256,
         num_attributes: int = 3,
+        columns_per_token: int = 1,
         attribute_mappings: Optional[Dict] = None,
     ):
         super().__init__()
         self.num_tile_types = num_tile_types
         self.column_height = column_height
+        self.columns_per_token = columns_per_token
         self.d_model = d_model
         self.n_layers = n_layers
         self.max_seq_len = max_seq_len
@@ -235,6 +241,7 @@ class Mamba(nn.Module):
             column_height=column_height,
             tile_embed_dim=tile_embed_dim,
             d_model=d_model,
+            columns_per_token=columns_per_token,
         )
 
         self.attribute_embedding = AttributeEmbedding(
@@ -273,6 +280,7 @@ class Mamba(nn.Module):
             num_tile_types=num_tile_types,
             column_height=column_height,
             d_model=d_model,
+            columns_per_token=columns_per_token,
         )
 
         # Attribute predictor for auxiliary loss
@@ -358,9 +366,11 @@ class Mamba(nn.Module):
         self.eval()
 
         if initial_column is None:
+            # Token shape: [1, K * H]
             initial_column = torch.full(
-                (1, self.column_height), 2, dtype=torch.long, device=device
+                (1, self.columns_per_token * self.column_height), 2, dtype=torch.long, device=device
             )  
+            # Set the bottom tile of the last column in the token to 0 (Ground)
             initial_column[0, -1] = 0
         else:
             initial_column = initial_column.to(device).long()
@@ -386,11 +396,17 @@ class Mamba(nn.Module):
         # Note: These indices depend on LevelParser. I'll use common indices or make them configurable.
         # Better: assume the user provides a counting function or we hardcode based on standard Mario-GPT parser.
         
-        for i in range(num_columns):
+        # Target steps: if columns_per_token is 2, we generate half the number of steps
+        num_steps = max(1, num_columns // self.columns_per_token)
+        
+        for i in range(num_steps):
             seq = torch.stack(columns, dim=1)
             # cond_seq: [1, current_len, K]
             cond_seq = torch.cat(history_counts, dim=1)
-
+            
+            if i == 0:
+                gap_state = False # Track if we are currently inside a gap
+            
             if seq.shape[1] > self.max_seq_len:
                 seq = seq[:, -self.max_seq_len:]
                 cond_seq = cond_seq[:, -self.max_seq_len:]
@@ -411,15 +427,47 @@ class Mamba(nn.Module):
             )
             
             # Update remaining counts for the NEXT step
-            # Here we need the counting logic
-            current_counts = self._count_column_attributes(next_column)
+            # Counts the attributes across all columns in this token
+            # We track gap_state to avoid counting a wide gap as multiple gaps
+            current_counts, gap_state = self._count_token_attributes(next_column, gap_state)
             remaining_counts = (remaining_counts - current_counts).clamp(min=0)
             
             columns.append(next_column.unsqueeze(0))
             history_counts.append(remaining_counts.unsqueeze(1))
 
-        generated = torch.stack([c.squeeze(0) for c in columns[1:]], dim=0)
+        # [num_steps, K * H]
+        generated_tokens = torch.stack([c.squeeze(0) for c in columns[1:]], dim=0)
+        # Reshape back to individual columns [num_columns, H]
+        generated = generated_tokens.reshape(-1, self.column_height)
         return generated
+
+    def _count_token_attributes(self, token: torch.Tensor, in_gap_prev: bool) -> tuple[torch.Tensor, bool]:
+        """Helper to count attributes in a multi-column token, tracking gap continuity."""
+        # token: [K * H]
+        K = self.columns_per_token
+        H = self.column_height
+        columns = token.reshape(K, H)
+        
+        total_counts = torch.zeros(self.num_attributes, device=token.device)
+        in_gap = in_gap_prev
+        
+        for i in range(K):
+            col = columns[i]
+            col_counts = self._count_column_attributes(col)
+            
+            # Enemies and Pipes are summed normally
+            total_counts[0] += col_counts[0]
+            total_counts[2] += col_counts[2]
+            
+            # Gaps: only count if it's the start of a new contiguous gap
+            is_gap_col = (col_counts[1] > 0)
+            if is_gap_col and not in_gap:
+                total_counts[1] += 1
+                in_gap = True
+            elif not is_gap_col:
+                in_gap = False
+                
+        return total_counts, in_gap
 
     def _count_column_attributes(self, column: torch.Tensor) -> torch.Tensor:
         """Helper to count attributes in a single generated column."""

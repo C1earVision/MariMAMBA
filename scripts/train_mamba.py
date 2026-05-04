@@ -60,6 +60,7 @@ full_dataset = ColumnSequenceDataset(
     stride=train_config.stride,
     parser=parser,
     num_attributes=3,
+    columns_per_token=model_config.columns_per_token,
 )
 
 random.seed(42)
@@ -99,6 +100,7 @@ model = Mamba(
     dropout=model_config.dropout,
     max_seq_len=model_config.max_seq_len,
     num_attributes=3,
+    columns_per_token=model_config.columns_per_token,
 ).to(device)
 
 num_params = sum(p.numel() for p in model.parameters())
@@ -144,6 +146,7 @@ full_checkpoint = {
         'expand': model_config.expand,
         'max_seq_len': model_config.max_seq_len,
         'num_attributes': 3,
+        'columns_per_token': model_config.columns_per_token,
         'batch_size': train_config.batch_size,
     }
 }

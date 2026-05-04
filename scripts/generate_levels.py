@@ -73,6 +73,7 @@ model = Mamba(
     dropout=0.0,
     max_seq_len=model_config.max_seq_len,
     num_attributes=3,
+    columns_per_token=model_config.columns_per_token,
 ).to(device)
 
 checkpoint = torch.load(model_path, map_location=device)

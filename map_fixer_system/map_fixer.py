@@ -467,6 +467,7 @@ def get_mamba_model():
             expand=config.expand,
             dropout=0.0,
             max_seq_len=config.max_seq_len,
+            columns_per_token=config.columns_per_token,
         ).to(_device)
         
         checkpoint_path = "checkpoints/mamba_best_ema.pth"

@@ -11,3 +11,4 @@ class MambaConfig:
     expand: int = 2
     dropout: float = 0.2
     max_seq_len: int = 32
+    columns_per_token: int = 2

@@ -14,11 +14,13 @@ class ColumnSequenceDataset(Dataset):
         stride: int = 1,
         parser: Optional[LevelParser] = None,
         num_attributes: int = 3,
+        columns_per_token: int = 1,
     ):
         super().__init__()
         self.max_seq_len = max_seq_len
         self.num_attributes = num_attributes
         self.parser = parser
+        self.columns_per_token = columns_per_token
         
         self.sequences = []
         
@@ -31,67 +33,80 @@ class ColumnSequenceDataset(Dataset):
         for level_idx, level in enumerate(levels):
             H, W = level.shape
             columns = level.T  # [W, H] 
-            
-            # 1. Pre-compute attributes for each column in this level
-            level_attrs = self._get_level_attributes(columns) # [W, num_attributes]
+            level_attrs = self._get_level_attributes(columns) # [W, 3]
 
-            if W < 2:
+            # Group columns into tokens
+            K = self.columns_per_token
+            num_tokens = W // K
+            if num_tokens < 2:
                 continue
-            window_size = min(max_seq_len + 1, W)
-            for start in range(0, W - 1, stride):
-                end = min(start + window_size, W)
+            
+            # Reshape to [num_tokens, K*H]
+            # Each "token" is now K columns concatenated
+            tokenized_columns = torch.from_numpy(columns[:num_tokens * K]).reshape(num_tokens, K * H).long()
+            # Group attributes by summing them over the K columns
+            tokenized_attrs = torch.from_numpy(level_attrs[:num_tokens * K]).reshape(num_tokens, K, 3).sum(dim=1)
+
+            W_tok = num_tokens
+            window_size = min(max_seq_len + 1, W_tok)
+            
+            for start in range(0, W_tok - 1, stride):
+                end = min(start + window_size, W_tok)
                 if end - start < 2:
                     continue
 
-                chunk_cols = torch.from_numpy(columns[start:end]).long()
-                chunk_attrs = level_attrs[start:end] # [win, 4]
+                chunk_cols = tokenized_columns[start:end]
+                chunk_attrs = tokenized_attrs[start:end]
 
-                # 2. Compute "Remaining Counts" for this chunk
-                # For each step t, the conditioning is the sum of attributes from t to the end of the chunk
-                # Shape: [win, 4]
-                remaining_counts = np.flip(np.cumsum(np.flip(chunk_attrs, axis=0), axis=0), axis=0).copy()
+                # Compute "Remaining Counts"
+                # remaining_counts[t] is sum of attributes from t to end of chunk
+                remaining_counts = torch.flip(torch.cumsum(torch.flip(chunk_attrs, dims=[0]), dim=0), dims=[0])
                 
                 input_seq = chunk_cols[:-1]
                 target_seq = chunk_cols[1:]
-                # Conditioning for predicting target_seq[t] is remaining_counts[t]
-                cond_seq = torch.from_numpy(remaining_counts[:-1]).float()
+                cond_seq = remaining_counts[:-1].float()
 
                 seq_len = input_seq.shape[0]
                 pad_len = max_seq_len - seq_len
 
                 if pad_len > 0:
-                    H_dim = input_seq.shape[1]
+                    H_eff = K * H
                     input_seq = torch.cat([
                         input_seq,
-                        torch.zeros(pad_len, H_dim, dtype=torch.long)
+                        torch.zeros(pad_len, H_eff, dtype=torch.long)
                     ], dim=0)
                     target_seq = torch.cat([
                         target_seq,
-                        torch.zeros(pad_len, H_dim, dtype=torch.long)
+                        torch.zeros(pad_len, H_eff, dtype=torch.long)
                     ], dim=0)
                     cond_seq = torch.cat([
                         cond_seq,
-                        torch.zeros(pad_len, num_attributes, dtype=torch.float32)
+                        torch.zeros(pad_len, 3, dtype=torch.float32)
                     ], dim=0)
 
                 self.sequences.append((input_seq, cond_seq, target_seq, seq_len))
 
-        print(f"ColumnSequenceDataset: {len(self.sequences)} sequences from "
-              f"{len(levels)} levels (stride={stride}, max_seq_len={max_seq_len})")
+        print(f"ColumnSequenceDataset: {len(self.sequences)} sequences ({self.columns_per_token} cols/token) from "
+              f"{len(levels)} levels")
 
     def _get_level_attributes(self, columns: np.ndarray) -> np.ndarray:
         W, H = columns.shape
         attrs = np.zeros((W, 3), dtype=np.float32)
         
+        in_gap = False
         for i in range(W):
             col = columns[i]
             # Enemies
             if any(tile in self.enemy_tiles for tile in col):
                 attrs[i, 0] = 1.0
             
-            # Gaps (check bottom tile)
-            if col[H-1] == self.empty_tile:
+            # Gaps: Count 1 only at the START of a contiguous gap
+            is_gap_col = (col[H-1] == self.empty_tile)
+            if is_gap_col and not in_gap:
                 attrs[i, 1] = 1.0
+                in_gap = True
+            elif not is_gap_col:
+                in_gap = False
             
             # Pipes
             if any(tile in self.pipe_tiles for tile in col):

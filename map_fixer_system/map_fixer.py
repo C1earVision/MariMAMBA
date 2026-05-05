@@ -208,10 +208,10 @@ def analyze_stuck(grid, visited, stuck_col):
     for c in range(stuck_col, look_ahead + 1):
         col_solid = [r for r in range(h) if solid(grid, r, c)]
         if len(col_solid) >= h - 1:
-            problems.append(f"SOLID WALL at col {c}: Too high to jump.")
+            problems.append(f"BLOCKAGE at col {c}: A solid vertical wall is preventing Mario from moving right.")
             break
         if passable(grid, h - 1, c):
-            problems.append(f"PIT at col {c}: Row {h-1} must be 'X'.")
+            problems.append(f"DANGEROUS PIT at col {c}: There is no ground at the bottom of this column.")
 
     # 2. Structural checks
     struct_probs = check_structural_integrity(grid, max(0, stuck_col - 4), look_ahead + 4)
@@ -219,7 +219,7 @@ def analyze_stuck(grid, visited, stuck_col):
         problems.append(f"STRUCTURAL ERROR: {desc}")
 
     if not problems:
-        problems.append(f"Mario is stuck at col {stuck_col}. Add platforms or clear paths to the right.")
+        problems.append(f"REACHABILITY: Mario is stuck at col {stuck_col} and cannot find a path forward.")
 
     return problems
 
@@ -238,13 +238,13 @@ MARIO'S CAPABILITIES:
 - Max jump width:  5 tiles horizontally
 - Solid obstacles: X S ? Q < > [ ] B b E
 
-FIXING STRATEGIES:
-1. TALL WALLS  – lower wall or add 'S' step blocks so height diff ≤ 5 tiles.
-2. WIDE GAPS   – place 'X' stepping stones so no gap exceeds 5 tiles.
-3. BOTTOMLESS  – fill empty bottom rows with 'X'.
-4. MISMATCHED TILES – Fix broken pipes (ensure < is with >, [ with ]) and cannons (B must have b below).
-5. MINIMALISM  – change as few tiles as possible.
-6. CONSISTENCY – Ensure the structure makes visual and logical sense.
+STRICT FIXING RULES:
+1. REMOVAL ONLY – Your primary goal is to REMOVE blockages. Change solid tiles to '-' to clear a path.
+2. NO NEW ENEMIES – Never add an 'E' tile.
+3. NO NEW PIPES – Do not add pipe tiles ('<', '>', '[', ']') unless you are finishing a broken pipe that already exists.
+4. NO NEW PLATFORMS – Do not add new rows of 'X' or 'S' unless you are filling a gap that is impossible to jump (> 5 tiles).
+5. FIX BROKEN STRUCTURES – If you see a structural error (like a half-pipe or a cannon without a base), you MUST fix it by adding the missing tiles.
+6. MINIMALISM – Change as few tiles as possible. Do not decorate.
 
 CRITICAL OUTPUT RULES:
 1. Output ONLY the exact text grid rows. NO markdown, NO backticks, NO explanations.
@@ -360,10 +360,6 @@ def run_fix_pipeline(grid, api_key):
         "solvable": sol0, "stuck_col": stuck0, "round": 0,
     }
 
-    if sol0:
-        yield {"log": "Level is already solvable — no fixes needed."}
-        return
-
     current = copy.deepcopy(grid)
     last_stuck_col      = -1
     attempts_at_col     = 0
@@ -373,21 +369,22 @@ def run_fix_pipeline(grid, api_key):
         visited, path, solvable, stuck_col = bfs_reachability(current)
         fix_round = total_round
 
-        if solvable:
-            # Even if solvable, check for structural errors
-            integrity_probs = check_structural_integrity(current)
-            if not integrity_probs:
-                yield {"log": f"SOLVED and Structural Integrity Verified after {total_round} fix round(s)!"}
-                yield {
-                    "grid": current, "visited": visited, "path": path,
-                    "solvable": True, "stuck_col": None, "round": total_round,
-                }
-                return
-            else:
-                # Pick the first structural problem to fix
-                first_prob_col, _ = integrity_probs[0]
-                stuck_col = first_prob_col
-                yield {"log": f"Level is solvable, but found {len(integrity_probs)} structural issues. Fixing..."}
+        # Check for structural errors regardless of solvability
+        integrity_probs = check_structural_integrity(current)
+        
+        if solvable and not integrity_probs:
+            yield {"log": f"SUCCESS: Level is solvable and structurally sound after {total_round} rounds."}
+            yield {
+                "grid": current, "visited": visited, "path": path,
+                "solvable": True, "stuck_col": None, "round": total_round,
+            }
+            return
+
+        # If solvable but has structural errors, target the first error for fixing
+        if solvable and integrity_probs:
+            first_prob_col, _ = integrity_probs[0]
+            stuck_col = first_prob_col
+            yield {"log": f"Level is solvable, but found {len(integrity_probs)} structural issues. Targeting col {stuck_col} for repair..."}
 
 
         if stuck_col == last_stuck_col:

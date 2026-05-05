@@ -3,7 +3,7 @@ from dataclasses import dataclass
 @dataclass
 class MambaTrainingConfig:
     batch_size: int = 32
-    num_epochs: int = 300
+    num_epochs: int = 400
     learning_rate: float = 2e-4
     weight_decay: float = 0.1
     ema_decay: float = 0.999

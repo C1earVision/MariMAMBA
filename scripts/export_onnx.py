@@ -51,7 +51,10 @@ def try_export():
     # 3. Create dummy inputs
     batch_size = 1
     seq_len = m_cfg.max_seq_len # Use configured max length for export
-    column_sequence = torch.randint(0, m_cfg.num_tile_types, (batch_size, seq_len, m_cfg.column_height))
+    column_sequence = torch.randint(
+        0, m_cfg.num_tile_types, 
+        (batch_size, seq_len, m_cfg.column_height * m_cfg.columns_per_token)
+    )
     attribute_sequence = torch.randn(batch_size, seq_len, m_cfg.num_attributes)
 
     print(f"Attempting ONNX export with seq_len={seq_len}...")

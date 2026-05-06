@@ -42,7 +42,10 @@ def validate():
     model.eval()
 
     # 2. Prepare Inputs
-    col_seq = torch.randint(0, m_cfg.num_tile_types, (1, seq_len, m_cfg.column_height))
+    col_seq = torch.randint(
+        0, m_cfg.num_tile_types, 
+        (1, seq_len, m_cfg.column_height * m_cfg.columns_per_token)
+    )
     attr_seq = torch.randn(1, seq_len, m_cfg.num_attributes)
 
     # 3. Get PyTorch Output

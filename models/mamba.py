@@ -229,9 +229,9 @@ class Mamba(nn.Module):
         # If None, use defaults for Mario
         if attribute_mappings is None:
             self.attribute_mappings = {
-                0: [5, 11], # Enemies: E, B
+                0: [5],     # Enemies: E only
                 1: [2],     # Gaps: - (check bottom)
-                2: [8],     # Pipes: [
+                2: [8],     # Pipes: [ (one per pipe)
             }
         else:
             self.attribute_mappings = attribute_mappings
@@ -388,26 +388,29 @@ class Mamba(nn.Module):
         remaining_counts = target_attrs.clone()
 
         columns = [initial_column]
-        # history_counts: [1, 1, K] - start with initial target
-        history_counts = [remaining_counts.unsqueeze(1)] 
 
-        # Define tile mappings for counting (matching dataset.py)
-        # Assuming we can infer these or they are passed in. For now, hardcode indices
-        # Enemies: E(5), B(11); Gaps: -(0); Pipes: [(6); Platforms: S(1), Q(7), ?(4)
-        # Note: These indices depend on LevelParser. I'll use common indices or make them configurable.
-        # Better: assume the user provides a counting function or we hardcode based on standard Mario-GPT parser.
-        
         # Target steps: if columns_per_token is 2, we generate half the number of steps
         num_steps = max(1, num_columns // self.columns_per_token)
-        
+
+        # Density scaling: the model was trained on windows of max_seq_len columns.
+        # remaining=2 in training means "2 items in ~max_seq_len columns."
+        # During generation of num_steps columns, we scale so the model sees
+        # the expected count within its learned window size, not the total.
+        def _scale_remaining(raw_remaining, steps_left):
+            """Scale raw remaining counts to training-window density."""
+            if steps_left <= self.max_seq_len:
+                return raw_remaining  # No scaling needed for short sequences
+            scale = self.max_seq_len / steps_left
+            return raw_remaining * scale
+
+        # Initial scaled conditioning
+        scaled = _scale_remaining(remaining_counts, num_steps)
+        history_counts = [scaled.unsqueeze(1)]
+
         for i in range(num_steps):
             seq = torch.stack(columns, dim=1)
-            # cond_seq: [1, current_len, K]
             cond_seq = torch.cat(history_counts, dim=1)
-            
-            if i == 0:
-                gap_state = False # Track if we are currently inside a gap
-            
+
             if seq.shape[1] > self.max_seq_len:
                 seq = seq[:, -self.max_seq_len:]
                 cond_seq = cond_seq[:, -self.max_seq_len:]
@@ -426,15 +429,17 @@ class Mamba(nn.Module):
             next_column = self._sample_column(
                 next_logits.squeeze(0), temperature, top_k, top_p
             )
-            
-            # Update remaining counts for the NEXT step
-            # Counts the attributes across all columns in this token
-            # We track gap_state to avoid counting a wide gap as multiple gaps
-            current_counts, gap_state = self._count_token_attributes(next_column, gap_state)
+
+            # Update remaining counts
+            current_counts = self._count_token_attributes(next_column)
             remaining_counts = (remaining_counts - current_counts).clamp(min=0)
-            
+
+            # Scale for the model's conditioning window
+            steps_left = num_steps - (i + 1)
+            scaled = _scale_remaining(remaining_counts, max(steps_left, 1))
+
             columns.append(next_column.unsqueeze(0))
-            history_counts.append(remaining_counts.unsqueeze(1))
+            history_counts.append(scaled.unsqueeze(1))
 
         # [num_steps, K * H]
         generated_tokens = torch.stack([c.squeeze(0) for c in columns[1:]], dim=0)
@@ -442,59 +447,30 @@ class Mamba(nn.Module):
         generated = generated_tokens.reshape(-1, self.column_height)
         return generated
 
-    def _count_token_attributes(self, token: torch.Tensor, in_gap_prev: bool) -> tuple[torch.Tensor, bool]:
-        """Helper to count attributes in a multi-column token, tracking gap continuity."""
-        # token: [K * H]
+    def _count_token_attributes(self, token: torch.Tensor) -> torch.Tensor:
+        """Count attributes in a multi-column token."""
         K = self.columns_per_token
         H = self.column_height
         columns = token.reshape(K, H)
         
         total_counts = torch.zeros(self.num_attributes, device=token.device)
-        in_gap = in_gap_prev
-        
         for i in range(K):
-            col = columns[i]
-            col_counts = self._count_column_attributes(col)
-            
-            # Enemies and Pipes are summed normally
-            total_counts[0] += col_counts[0]
-            total_counts[2] += col_counts[2]
-            
-            # Gaps: only count if it's the start of a new contiguous gap
-            is_gap_col = (col_counts[1] > 0)
-            if is_gap_col and not in_gap:
-                total_counts[1] += 1
-                in_gap = True
-            elif not is_gap_col:
-                in_gap = False
-                
-        return total_counts, in_gap
+            total_counts += self._count_column_attributes(columns[i])
+        return total_counts
 
     def _count_column_attributes(self, column: torch.Tensor) -> torch.Tensor:
-        """Helper to count attributes in a single generated column."""
+        """Count attributes in a single generated column."""
         counts = torch.zeros(self.num_attributes, device=column.device)
         
         for attr_idx, tile_indices in self.attribute_mappings.items():
-            if attr_idx == 0: # Enemies
-                # Check if any tile in column is in the list
-                is_present = False
-                for t_idx in tile_indices:
-                    if any(column == t_idx):
-                        is_present = True
-                        break
-                if is_present:
-                    counts[attr_idx] = 1.0
-            elif attr_idx == 1: # Gaps (check bottom row)
+            if attr_idx == 1:  # Gaps: check bottom row only
                 if column[-1] in tile_indices:
                     counts[attr_idx] = 1.0
-            elif attr_idx == 2: # Pipes
-                is_present = False
+            else:  # Enemies, Pipes: check any tile in column
                 for t_idx in tile_indices:
                     if any(column == t_idx):
-                        is_present = True
+                        counts[attr_idx] = 1.0
                         break
-                if is_present:
-                    counts[attr_idx] = 1.0
         
         return counts
 

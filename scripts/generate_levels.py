@@ -67,26 +67,38 @@ if not model_path:
 output_dir = config['output']['directory']
 
 # ─── Load Model ──────────────────────────────────────────────────────
+# Auto-detect architecture from checkpoint so generation works even if
+# model_config.py has been changed for a new training run.
+raw_ckpt = torch.load(model_path, map_location=device)
+state_dict = raw_ckpt.get('model_state_dict', raw_ckpt)
+
+# Infer d_state from A_log shape: [d_inner, d_state]
+ckpt_d_state = state_dict['layers.0.ssm.A_log'].shape[-1]
+# Infer max_seq_len from pos_embedding shape: [1, max_seq_len, d_model]
+ckpt_max_seq_len = state_dict['pos_embedding'].shape[1]
+
+if ckpt_d_state != m_cfg.d_state or ckpt_max_seq_len != m_cfg.max_seq_len:
+    print(f"  ⚠ Checkpoint config differs from model_config.py:")
+    print(f"    d_state: checkpoint={ckpt_d_state}, config={m_cfg.d_state}")
+    print(f"    max_seq_len: checkpoint={ckpt_max_seq_len}, config={m_cfg.max_seq_len}")
+    print(f"    Using checkpoint values for generation.")
+
 model = Mamba(
     num_tile_types=m_cfg.num_tile_types,
     column_height=m_cfg.column_height,
     tile_embed_dim=m_cfg.tile_embed_dim,
     d_model=m_cfg.d_model,
     n_layers=m_cfg.n_layers,
-    d_state=m_cfg.d_state,
+    d_state=ckpt_d_state,
     d_conv=m_cfg.d_conv,
     expand=m_cfg.expand,
     dropout=0.0,
-    max_seq_len=m_cfg.max_seq_len,
+    max_seq_len=ckpt_max_seq_len,
     num_attributes=m_cfg.num_attributes,
     columns_per_token=m_cfg.columns_per_token
 ).to(device)
 
-checkpoint = torch.load(model_path, map_location=device)
-if 'model_state_dict' in checkpoint:
-    model.load_state_dict(checkpoint['model_state_dict'])
-else:
-    model.load_state_dict(checkpoint)
+model.load_state_dict(state_dict)
 model.eval()
 print("Mamba model loaded")
 

@@ -45,22 +45,31 @@ def main():
         eval_config = yaml.safe_load(f)['evaluation']
 
     # ─── Load Model ──────────────────────────────────────────────────────
+    raw_ckpt = torch.load(gen_config['models']['mamba_path'], map_location=device)
+    state_dict = raw_ckpt.get('model_state_dict', raw_ckpt) if isinstance(raw_ckpt, dict) and 'model_state_dict' in raw_ckpt else raw_ckpt
+
+    # Auto-detect architecture from checkpoint
+    ckpt_d_state = state_dict['layers.0.ssm.A_log'].shape[-1]
+    ckpt_max_seq_len = state_dict['pos_embedding'].shape[1]
+
+    if ckpt_d_state != model_config.d_state or ckpt_max_seq_len != model_config.max_seq_len:
+        print(f"  ⚠ Using checkpoint values: d_state={ckpt_d_state}, max_seq_len={ckpt_max_seq_len}")
+
     model = Mamba(
         num_tile_types=model_config.num_tile_types,
         column_height=model_config.column_height,
         tile_embed_dim=model_config.tile_embed_dim,
         d_model=model_config.d_model,
         n_layers=model_config.n_layers,
-        d_state=model_config.d_state,
+        d_state=ckpt_d_state,
         d_conv=model_config.d_conv,
         expand=model_config.expand,
         dropout=0.0,
-        max_seq_len=model_config.max_seq_len,
+        max_seq_len=ckpt_max_seq_len,
         num_attributes=3
     ).to(device)
 
-    checkpoint = torch.load(gen_config['models']['mamba_path'], map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model.load_state_dict(state_dict)
     model.eval()
     print("Mamba model loaded")
 

@@ -170,21 +170,28 @@ class MambaTrainer:
         seq_lens = seq_lens.to(self.device).long()
 
         # CFG Masking
-        if self.model.training:
-            # Important: even if we drop attributes for CFG, 
-            # we should still try to predict the TRUE attributes for auxiliary loss
-            # so we keep a copy of the true cond_seq
-            true_cond_seq = cond_seq.clone()
-            drop_mask = torch.rand(input_cols.shape[0], device=self.device) < 0.15
-            cond_seq[drop_mask] = -1.0
+        true_cond_seq = cond_seq.clone()
+        drop_mask = torch.rand(input_cols.shape[0], device=self.device) < 0.15
+        cond_seq[drop_mask] = -1.0
 
         predicted_logits, predicted_attrs = self.model(input_cols, cond_seq)
         
-        # 1. Standard Cross Entropy Loss
+        # 1. Standard Cross Entropy Loss (ALL samples — needed for CFG)
         ce_loss = self._masked_column_ce(predicted_logits, target_cols, seq_lens)
         
-        # 2. Auxiliary Attribute Loss
-        attr_loss = self._masked_attr_loss(predicted_attrs, true_cond_seq, seq_lens)
+        # 2. Auxiliary Attribute Loss (ONLY conditioned samples)
+        # Dropped samples have no attribute info in their hidden states,
+        # so including them creates an impossible prediction task that
+        # plateaus at the dataset-mean error.
+        keep_mask = ~drop_mask
+        if keep_mask.any():
+            attr_loss = self._masked_attr_loss(
+                predicted_attrs[keep_mask],
+                true_cond_seq[keep_mask],
+                seq_lens[keep_mask]
+            )
+        else:
+            attr_loss = torch.tensor(0.0, device=self.device)
         
         # Total Loss
         total_loss = ce_loss + self.attr_loss_weight * attr_loss

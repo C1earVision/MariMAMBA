@@ -26,7 +26,7 @@ class ColumnSequenceDataset(Dataset):
         
         # Define tile mappings for attribute counting
         # [enemies, gaps, pipes]
-        self.enemy_tiles = {parser.tile_to_idx[t] for t in ['E', 'B'] if t in parser.tile_to_idx}
+        self.enemy_tiles = {parser.tile_to_idx[t] for t in ['E'] if t in parser.tile_to_idx}
         self.pipe_tiles = {parser.tile_to_idx[t] for t in ['['] if t in parser.tile_to_idx}
         self.empty_tile = parser.tile_to_idx['-']
 
@@ -93,20 +93,15 @@ class ColumnSequenceDataset(Dataset):
         W, H = columns.shape
         attrs = np.zeros((W, 3), dtype=np.float32)
         
-        in_gap = False
         for i in range(W):
             col = columns[i]
             # Enemies
             if any(tile in self.enemy_tiles for tile in col):
                 attrs[i, 0] = 1.0
             
-            # Gaps: Count 1 only at the START of a contiguous gap
-            is_gap_col = (col[H-1] == self.empty_tile)
-            if is_gap_col and not in_gap:
+            # Gaps: each column without ground counts as 1
+            if col[H-1] == self.empty_tile:
                 attrs[i, 1] = 1.0
-                in_gap = True
-            elif not is_gap_col:
-                in_gap = False
             
             # Pipes
             if any(tile in self.pipe_tiles for tile in col):

@@ -11,24 +11,30 @@ from models.mamba import Mamba
 def validate():
     # 1. Setup Models
     device = "cpu"
-    seq_len = 32
+    from config.model_config import MambaConfig
+    m_cfg = MambaConfig()
+    seq_len = m_cfg.max_seq_len
+
+    from config.training_config import MambaTrainingConfig
+    train_cfg = MambaTrainingConfig()
+    
     model = Mamba(
-        num_tile_types=13,
-        column_height=14,
-        tile_embed_dim=8,
-        d_model=128,
-        n_layers=6,
-        d_state=16,
-        d_conv=4,
-        expand=2,
+        num_tile_types=m_cfg.num_tile_types,
+        column_height=m_cfg.column_height,
+        tile_embed_dim=m_cfg.tile_embed_dim,
+        d_model=m_cfg.d_model,
+        n_layers=m_cfg.n_layers,
+        d_state=m_cfg.d_state,
+        d_conv=m_cfg.d_conv,
+        expand=m_cfg.expand,
         dropout=0.0,
-        max_seq_len=32,
-        num_attributes=3,
-        columns_per_token=1
+        max_seq_len=m_cfg.max_seq_len,
+        num_attributes=m_cfg.num_attributes,
+        columns_per_token=m_cfg.columns_per_token
     )
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    checkpoint_path = os.path.join(script_dir, "..", "checkpoints", "mamba_best_ema.pth")
+    checkpoint_path = train_cfg.save_path.replace('.pth', '_best.pth')
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -36,15 +42,15 @@ def validate():
     model.eval()
 
     # 2. Prepare Inputs
-    col_seq = torch.randint(0, 13, (1, seq_len, 14))
-    attr_seq = torch.randn(1, seq_len, 3)
+    col_seq = torch.randint(0, m_cfg.num_tile_types, (1, seq_len, m_cfg.column_height))
+    attr_seq = torch.randn(1, seq_len, m_cfg.num_attributes)
 
     # 3. Get PyTorch Output
     with torch.no_grad():
         pt_logits, pt_attrs = model(col_seq, attr_seq)
 
     # 4. Get ONNX Output
-    onnx_path = os.path.join(script_dir, "..", "checkpoints", "mamba_model.onnx")
+    onnx_path = checkpoint_path.replace('.pth', '.onnx')
     try:
         session = ort.InferenceSession(onnx_path)
         

@@ -58,11 +58,13 @@ class MambaTrainer:
         learning_rate: float = mamba_config.learning_rate,
         weight_decay: float = mamba_config.weight_decay,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        attr_loss_weight: float = 0.1
+        attr_loss_weight: float = 0.1,
+        use_ema: bool = mamba_config.use_ema
     ):
         self.model = model.to(device)
         self.device = device
         self.attr_loss_weight = attr_loss_weight
+        self.use_ema = use_ema
 
         self.optimizer = optim.AdamW(
             self.model.parameters(),
@@ -75,7 +77,10 @@ class MambaTrainer:
         # L1 loss for attribute prediction (more stable than MSE for counting)
         self.attr_criterion = nn.L1Loss(reduction='none')
 
-        self.ema = EMA(self.model, decay=mamba_config.ema_decay)
+        if self.use_ema:
+            self.ema = EMA(self.model, decay=mamba_config.ema_decay)
+        else:
+            self.ema = None
 
         self.train_losses = []
         self.val_losses = []
@@ -87,7 +92,10 @@ class MambaTrainer:
         print(f"  Device: {device}")
         print(f"  Learning rate: {learning_rate}")
         print(f"  Weight decay: {weight_decay}")
-        print(f"  EMA decay: {self.ema.decay}")
+        if self.use_ema:
+            print(f"  EMA decay: {self.ema.decay}")
+        else:
+            print(f"  EMA: Disabled")
         print(f"  Attr loss weight: {self.attr_loss_weight}")
         print(f"{'='*70}\n")
 
@@ -186,7 +194,8 @@ class MambaTrainer:
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
         self.optimizer.step()
 
-        self.ema.update(self.model)
+        if self.use_ema:
+            self.ema.update(self.model)
 
         return {
             'total': total_loss.item(),
@@ -195,7 +204,7 @@ class MambaTrainer:
         }
 
     def validate(self, val_loader: DataLoader, use_ema: bool = True) -> float:
-        if use_ema:
+        if self.use_ema and use_ema:
             self.ema.apply_shadow(self.model)
 
         self.model.eval()
@@ -221,7 +230,7 @@ class MambaTrainer:
 
         avg_loss = total_loss / max(1, num_batches)
 
-        if use_ema:
+        if self.use_ema and use_ema:
             self.ema.restore(self.model)
 
         return avg_loss
@@ -232,7 +241,8 @@ class MambaTrainer:
         val_loader: Optional[DataLoader] = None,
         num_epochs: int = mamba_config.num_epochs,
         save_interval: int = mamba_config.save_interval,
-        save_path: str = mamba_config.save_path
+        save_path: str = mamba_config.save_path,
+        trial = None
     ):
         print("=" * 70)
         print("TRAINING MAMBA MODEL")
@@ -282,6 +292,13 @@ class MambaTrainer:
                 print(f"Epoch {epoch+1}/{num_epochs} | Train: {avg_epoch_loss:.4f} | "
                       f"Val: {val_loss:.4f} | Patience: {patience_counter}/{patience}")
 
+                # Optuna pruning
+                if trial is not None:
+                    import optuna
+                    trial.report(val_loss, epoch)
+                    if trial.should_prune():
+                        raise optuna.exceptions.TrialPruned()
+
                 if patience_counter >= patience:
                     print(f"\n⚠ Early stopping triggered at epoch {epoch+1}! "
                           f"No improvement for {patience} epochs.")
@@ -294,24 +311,26 @@ class MambaTrainer:
 
         self.save_checkpoint(save_path)
         print(f"\nTraining complete! Best val loss: {best_val_loss:.4f}")
+        return best_val_loss
 
     def save_checkpoint(self, path: str):
         torch.save({
             'model_state_dict': self.model.state_dict(),
-            'ema_state_dict': self.ema.state_dict(),
+            'ema_state_dict': self.ema.state_dict() if self.use_ema else None,
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
             'epoch_losses': self.epoch_losses,
             'val_losses': self.val_losses,
         }, path)
 
-        ema_path = path.replace('.pth', '_ema.pth')
-        self.ema.apply_shadow(self.model)
-        torch.save({'model_state_dict': self.model.state_dict()}, ema_path)
-        self.ema.restore(self.model)
+        if self.use_ema:
+            ema_path = path.replace('.pth', '_ema.pth')
+            self.ema.apply_shadow(self.model)
+            torch.save({'model_state_dict': self.model.state_dict()}, ema_path)
+            self.ema.restore(self.model)
+            print(f"EMA weights saved to {ema_path}")
 
         print(f"Checkpoint saved to {path}")
-        print(f"EMA weights saved to {ema_path}")
 
     def plot_losses(self, save_path: Optional[str] = None):
         plt.figure(figsize=(8, 5))

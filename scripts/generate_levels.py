@@ -12,6 +12,7 @@ from models.mamba import Mamba
 from generation.renderer import save_level_image
 from data.parser import LevelParser
 from config.model_config import MambaConfig
+from config.training_config import MambaTrainingConfig
 from map_fixer_system.map_fixer import create_difficulty_schedule
 
 import sys
@@ -42,8 +43,11 @@ print("=" * 70)
 print(f"Device: {device}")
 
 # ─── Load Config ─────────────────────────────────────────────────────
-with open('config/generation_config.yaml', 'r') as f:
+with open('config/generation_config.yaml', 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
+
+m_cfg = MambaConfig()
+train_cfg = MambaTrainingConfig()
 
 columns_per_level = args.columns if args.columns is not None else config['generation']['columns_per_level']
 num_levels = args.num_levels if args.num_levels is not None else config['generation']['num_levels']
@@ -57,27 +61,32 @@ top_k = args.top_k if args.top_k is not None else config['generation'].get('top_
 top_p = args.top_p if args.top_p is not None else config['generation'].get('top_p', 1.0)
 cfg_scale = args.cfg_scale if args.cfg_scale is not None else config['generation'].get('cfg_scale', 3.0)
 
-model_path = config['models']['mamba_path']
+model_path = config['models'].get('mamba_path')
+if not model_path:
+    model_path = train_cfg.save_path.replace('.pth', '_best.pth')
 output_dir = config['output']['directory']
 
 # ─── Load Model ──────────────────────────────────────────────────────
 model = Mamba(
-    num_tile_types=model_config.num_tile_types,
-    column_height=model_config.column_height,
-    tile_embed_dim=model_config.tile_embed_dim,
-    d_model=model_config.d_model,
-    n_layers=model_config.n_layers,
-    d_state=model_config.d_state,
-    d_conv=model_config.d_conv,
-    expand=model_config.expand,
+    num_tile_types=m_cfg.num_tile_types,
+    column_height=m_cfg.column_height,
+    tile_embed_dim=m_cfg.tile_embed_dim,
+    d_model=m_cfg.d_model,
+    n_layers=m_cfg.n_layers,
+    d_state=m_cfg.d_state,
+    d_conv=m_cfg.d_conv,
+    expand=m_cfg.expand,
     dropout=0.0,
-    max_seq_len=model_config.max_seq_len,
-    num_attributes=3,
-    columns_per_token=model_config.columns_per_token,
+    max_seq_len=m_cfg.max_seq_len,
+    num_attributes=m_cfg.num_attributes,
+    columns_per_token=m_cfg.columns_per_token
 ).to(device)
 
 checkpoint = torch.load(model_path, map_location=device)
-model.load_state_dict(checkpoint['model_state_dict'])
+if 'model_state_dict' in checkpoint:
+    model.load_state_dict(checkpoint['model_state_dict'])
+else:
+    model.load_state_dict(checkpoint)
 model.eval()
 print("Mamba model loaded")
 

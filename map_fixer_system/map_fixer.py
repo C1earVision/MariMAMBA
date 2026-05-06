@@ -450,34 +450,44 @@ _device = 'cuda' if torch.cuda.is_available() else 'cpu'
 def get_mamba_model():
     global _mamba_model, _mamba_parser
     if _mamba_model is None:
+        from config.training_config import MambaTrainingConfig
+        t_cfg = MambaTrainingConfig()
+        m_cfg = MambaConfig()
+        
         print("[Mamba] Initializing Mamba...")
-        config = MambaConfig()
         _mamba_parser = LevelParser()
         _mamba_model = Mamba(
-            num_tile_types=config.num_tile_types,
-            column_height=config.column_height,
-            tile_embed_dim=config.tile_embed_dim,
-            d_model=config.d_model,
-            n_layers=config.n_layers,
-            d_state=config.d_state,
-            d_conv=config.d_conv,
-            expand=config.expand,
+            num_tile_types=m_cfg.num_tile_types,
+            column_height=m_cfg.column_height,
+            tile_embed_dim=m_cfg.tile_embed_dim,
+            d_model=m_cfg.d_model,
+            n_layers=m_cfg.n_layers,
+            d_state=m_cfg.d_state,
+            d_conv=m_cfg.d_conv,
+            expand=m_cfg.expand,
             dropout=0.0,
-            max_seq_len=config.max_seq_len,
-            columns_per_token=config.columns_per_token,
+            max_seq_len=m_cfg.max_seq_len,
+            num_attributes=m_cfg.num_attributes,
+            columns_per_token=m_cfg.columns_per_token,
         ).to(_device)
         
-        checkpoint_path = "checkpoints/mamba_best_ema.pth"
+        # Determine checkpoint path
+        checkpoint_path = t_cfg.save_path.replace('.pth', '_best.pth')
+        # If EMA was requested and exists, use it
+        ema_path = checkpoint_path.replace('.pth', '_ema.pth')
+        if t_cfg.use_ema and os.path.exists(ema_path):
+            checkpoint_path = ema_path
+            
         if os.path.exists(checkpoint_path):
             checkpoint = torch.load(checkpoint_path, map_location=_device)
-            # Handle both full state and state_dict only
             state_dict = checkpoint.get('model_state_dict', checkpoint)
             _mamba_model.load_state_dict(state_dict)
             _mamba_model.eval()
-            print(f"[Mamba] Loaded checkpoint: {checkpoint_path}")
+            print(f"[Mamba] Loaded weights from: {checkpoint_path}")
         else:
-            print(f"[Mamba] ⚠ Checkpoint not found at {checkpoint_path}")
+            print(f"[Mamba] ⚠ Weights not found at {checkpoint_path}")
             
+    return _mamba_model, _mamba_parser
     return _mamba_model, _mamba_parser
 
 

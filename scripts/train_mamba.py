@@ -99,7 +99,7 @@ model = Mamba(
     expand=model_config.expand,
     dropout=model_config.dropout,
     max_seq_len=model_config.max_seq_len,
-    num_attributes=3,
+    num_attributes=model_config.num_attributes,
     columns_per_token=model_config.columns_per_token,
 ).to(device)
 

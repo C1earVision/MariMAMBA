@@ -23,6 +23,7 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 
 # Development
+optuna>=3.0.0
 jupyter>=1.0.0
 ipykernel>=6.23.0
 black>=23.0.0

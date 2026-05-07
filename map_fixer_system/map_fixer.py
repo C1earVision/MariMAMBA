@@ -154,57 +154,12 @@ def bfs_reachability(grid):
     return visited_set, best_path, False, stuck_col
 
 
-def check_structural_integrity(grid, start_col=0, end_col=None):
-    """
-    Checks for mismatched tiles (incomplete pipes, floating cannons).
-    Returns a list of (column, problem_description) tuples.
-    """
-    h, w = len(grid), len(grid[0])
-    if end_col is None:
-        end_col = w
-    problems = []
-    
-    for c in range(start_col, min(end_col, w)):
-        for r in range(h):
-            tile = grid[r][c]
-            
-            # Pipe tops: < must have >
-            if tile == "<":
-                if c + 1 >= w or grid[r][c+1] != ">":
-                    problems.append((c, f"INCOMPLETE PIPE TOP: '<' at ({r},{c}) is missing its right half '>'."))
-            elif tile == ">":
-                if c - 1 < 0 or grid[r][c-1] != "<":
-                    problems.append((c, f"INCOMPLETE PIPE TOP: '>' at ({r},{c}) is missing its left half '<'."))
-            
-            # Pipe bodies: [ must have ]
-            elif tile == "[":
-                if c + 1 >= w or grid[r][c+1] != "]":
-                    problems.append((c, f"INCOMPLETE PIPE BODY: '[' at ({r},{c}) is missing its right half ']'."))
-                if r > 0 and grid[r-1][c] not in ("<", "["):
-                    problems.append((c, f"FLOATING PIPE BODY: '[' at ({r},{c}) should have '<' or '[' above it."))
-            elif tile == "]":
-                if c - 1 < 0 or grid[r][c-1] != "[":
-                    problems.append((c, f"INCOMPLETE PIPE BODY: ']' at ({r},{c}) is missing its left half '['."))
-                if r > 0 and grid[r-1][c] not in (">", "]"):
-                    problems.append((c, f"FLOATING PIPE BODY: ']' at ({r},{c}) should have '>' or ']' above it."))
-            
-            # Cannons
-            elif tile == "B":
-                if r + 1 >= h or grid[r+1][c] != "b":
-                    problems.append((c, f"FLOATING CANNON: 'B' at ({r},{c}) is missing its base 'b' below it."))
-            elif tile == "b":
-                if r - 1 < 0 or grid[r-1][c] not in ("B", "b"):
-                    problems.append((c, f"MISPLACED CANNON BASE: 'b' at ({r},{c}) has no cannon 'B' above it."))
-
-    return problems
-
-
 def analyze_stuck(grid, visited, stuck_col):
+    """Analyze why Mario is stuck — only reachability / physics problems."""
     h, w = len(grid), len(grid[0])
     problems = []
     look_ahead = min(stuck_col + 12, w - 1)
 
-    # 1. Physics/Reachability checks
     for c in range(stuck_col, look_ahead + 1):
         col_solid = [r for r in range(h) if solid(grid, r, c)]
         if len(col_solid) >= h - 1:
@@ -212,11 +167,6 @@ def analyze_stuck(grid, visited, stuck_col):
             break
         if passable(grid, h - 1, c):
             problems.append(f"DANGEROUS PIT at col {c}: There is no ground at the bottom of this column.")
-
-    # 2. Structural checks
-    struct_probs = check_structural_integrity(grid, max(0, stuck_col - 4), look_ahead + 4)
-    for _, desc in struct_probs:
-        problems.append(f"STRUCTURAL ERROR: {desc}")
 
     if not problems:
         problems.append(f"REACHABILITY: Mario is stuck at col {stuck_col} and cannot find a path forward.")
@@ -226,8 +176,8 @@ def analyze_stuck(grid, visited, stuck_col):
 
 
 SYSTEM_PROMPT = textwrap.dedent("""\
-You are an expert Super Mario Bros level designer and bug-fixer.
-Your task is to fix a small LEVEL WINDOW (a text grid) so Mario can traverse it left to right.
+You are an expert Super Mario Bros level designer.
+Your task is to make a small LEVEL WINDOW (a text grid) passable so Mario can traverse it left to right.
 
 TILE LEGEND:
 X=solid ground, S=breakable block, -=empty air, ?=question block full, Q=question block empty,
@@ -239,12 +189,12 @@ MARIO'S CAPABILITIES:
 - Solid obstacles: X S ? Q < > [ ] B b E
 
 STRICT FIXING RULES:
-1. REMOVAL ONLY – Your primary goal is to REMOVE blockages. Change solid tiles to '-' to clear a path.
-2. NO NEW ENEMIES – Never add an 'E' tile.
-3. NO NEW PIPES – Do not add pipe tiles ('<', '>', '[', ']') unless you are finishing a broken pipe that already exists.
-4. NO NEW PLATFORMS – Do not add new rows of 'X' or 'S' unless you are filling a gap that is impossible to jump (> 5 tiles).
-5. FIX BROKEN STRUCTURES – If you see a structural error (like a half-pipe or a cannon without a base), you MUST fix it by adding the missing tiles.
-6. MINIMALISM – Change as few tiles as possible. Do not decorate.
+1. MINIMALISM – Change as few tiles as possible. Only remove tiles that are blocking Mario's path.
+2. REMOVAL ONLY – Your primary tool is changing solid tiles to '-' (empty air) to clear a path for Mario.
+3. DO NOT touch pipes, enemies, coins, or any tiles that are NOT directly blocking Mario's path.
+4. DO NOT add new tiles. DO NOT add platforms, enemies, blocks, or any structures.
+5. DO NOT fix cosmetic issues, broken structures, or anything unrelated to making the path passable.
+6. Your ONLY goal is to let Mario walk or jump from the left side to the right side of this window.
 
 CRITICAL OUTPUT RULES:
 1. Output ONLY the exact text grid rows. NO markdown, NO backticks, NO explanations.
@@ -303,10 +253,10 @@ def build_window_prompt(grid, stuck_col, visited, problems, attempt):
 
     prompt = (
         f"=== LEVEL WINDOW ({win_h}r × {win_w}c) — attempt {attempt+1} ===\n"
-        f"Mario is STUCK near the centre of this window.\n\n"
+        f"Mario is STUCK near the centre of this window and cannot move right.\n\n"
         f"PROBLEMS:\n{prob_text}\n\n"
         f"WINDOW:\n{window_str}\n\n"
-        f"Fix the window so Mario can pass.\n"
+        f"Remove the minimum number of blocking tiles (change them to '-') so Mario can pass through.\n"
         f"Return ONLY the {win_h} rows, each exactly {win_w} characters.\n"
     )
     return r0, r1, c0, c1, win_h, win_w, prompt
@@ -360,6 +310,11 @@ def run_fix_pipeline(grid, api_key):
         "solvable": sol0, "stuck_col": stuck0, "round": 0,
     }
 
+    # If already solvable, nothing to do
+    if sol0:
+        yield {"log": "Level is already solvable. No fixes needed."}
+        return
+
     current = copy.deepcopy(grid)
     last_stuck_col      = -1
     attempts_at_col     = 0
@@ -369,23 +324,13 @@ def run_fix_pipeline(grid, api_key):
         visited, path, solvable, stuck_col = bfs_reachability(current)
         fix_round = total_round
 
-        # Check for structural errors regardless of solvability
-        integrity_probs = check_structural_integrity(current)
-        
-        if solvable and not integrity_probs:
-            yield {"log": f"SUCCESS: Level is solvable and structurally sound after {total_round} rounds."}
+        if solvable:
+            yield {"log": f"SUCCESS: Level is now solvable after {total_round} fix rounds."}
             yield {
                 "grid": current, "visited": visited, "path": path,
                 "solvable": True, "stuck_col": None, "round": total_round,
             }
             return
-
-        # If solvable but has structural errors, target the first error for fixing
-        if solvable and integrity_probs:
-            first_prob_col, _ = integrity_probs[0]
-            stuck_col = first_prob_col
-            yield {"log": f"Level is solvable, but found {len(integrity_probs)} structural issues. Targeting col {stuck_col} for repair..."}
-
 
         if stuck_col == last_stuck_col:
             attempts_at_col += 1
@@ -487,7 +432,6 @@ def get_mamba_model():
         else:
             print(f"[Mamba] ⚠ Weights not found at {checkpoint_path}")
             
-    return _mamba_model, _mamba_parser
     return _mamba_model, _mamba_parser
 
 

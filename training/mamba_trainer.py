@@ -72,8 +72,16 @@ class MambaTrainer:
             weight_decay=weight_decay
         )
 
+        # Define class weights to heavily penalize breaking rare structural tiles (like pipes)
+        # 6:<, 7:>, 8:[, 9:]
+        weights = torch.ones(self.model.num_tile_types, device=device)
+        weights[6] = 1.5  # <
+        weights[7] = 1.5  # >
+        weights[8] = 1.5  # [
+        weights[9] = 1.5  # ]
+
         # Per-tile cross entropy (reduction='none' for masking)
-        self.criterion = nn.CrossEntropyLoss(reduction='none')
+        self.criterion = nn.CrossEntropyLoss(weight=weights, reduction='none')
         # L1 loss for attribute prediction (more stable than MSE for counting)
         self.attr_criterion = nn.L1Loss(reduction='none')
 

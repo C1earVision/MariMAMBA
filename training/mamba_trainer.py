@@ -58,7 +58,7 @@ class MambaTrainer:
         learning_rate: float = mamba_config.learning_rate,
         weight_decay: float = mamba_config.weight_decay,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        attr_loss_weight: float = 0.1,
+        attr_loss_weight: float = 0.1, #0.1
         use_ema: bool = mamba_config.use_ema
     ):
         self.model = model.to(device)
@@ -72,16 +72,8 @@ class MambaTrainer:
             weight_decay=weight_decay
         )
 
-        # Define class weights to heavily penalize breaking rare structural tiles (like pipes)
-        # 6:<, 7:>, 8:[, 9:]
-        weights = torch.ones(self.model.num_tile_types, device=device)
-        weights[6] = 1.5  # <
-        weights[7] = 1.5  # >
-        weights[8] = 1.5  # [
-        weights[9] = 1.5  # ]
-
         # Per-tile cross entropy (reduction='none' for masking)
-        self.criterion = nn.CrossEntropyLoss(weight=weights, reduction='none')
+        self.criterion = nn.CrossEntropyLoss(reduction='none')
         # L1 loss for attribute prediction (more stable than MSE for counting)
         self.attr_criterion = nn.L1Loss(reduction='none')
 
@@ -257,7 +249,6 @@ class MambaTrainer:
         num_epochs: int = mamba_config.num_epochs,
         save_interval: int = mamba_config.save_interval,
         save_path: str = mamba_config.save_path,
-        trial = None
     ):
         print("=" * 70)
         print("TRAINING MAMBA MODEL")
@@ -307,12 +298,6 @@ class MambaTrainer:
                 print(f"Epoch {epoch+1}/{num_epochs} | Train: {avg_epoch_loss:.4f} | "
                       f"Val: {val_loss:.4f} | Patience: {patience_counter}/{patience}")
 
-                # Optuna pruning
-                if trial is not None:
-                    import optuna
-                    trial.report(val_loss, epoch)
-                    if trial.should_prune():
-                        raise optuna.exceptions.TrialPruned()
 
                 if patience_counter >= patience:
                     print(f"\n⚠ Early stopping triggered at epoch {epoch+1}! "

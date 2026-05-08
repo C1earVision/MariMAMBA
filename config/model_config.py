@@ -10,6 +10,6 @@ class MambaConfig:
     d_conv: int = 4
     expand: int = 2
     dropout: float = 0.15
-    max_seq_len: int = 12
-    columns_per_token: int = 4
+    max_seq_len: int = 4
+    columns_per_token: int = 2
     num_attributes: int = 3

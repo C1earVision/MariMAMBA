@@ -29,6 +29,7 @@ def load_mamba_model(device: str) -> tuple:
         expand=mamba_config.expand,
         dropout=0.0,
         max_seq_len=mamba_config.max_seq_len,
+        columns_per_token=mamba_config.columns_per_token,
     ).to(device)
 
     mamba_checkpoint = torch.load(gen_config['models']['mamba_path'], map_location=device)
@@ -153,32 +154,40 @@ def generate_mariogpt_samples(
 def evaluate_controllability(samples: Dict, model: Mamba) -> Dict:
     results = {}
     all_errors = []
+    all_exact_matches = []
 
     for target_str, patches in samples.items():
         if target_str == 'overall': continue
         target = eval(target_str)
         actual_counts = []
+        exact_matches = 0
         for patch in patches:
             actual = count_attributes_in_patch(patch, model)
             actual_counts.append(actual)
+            # Check if actual perfectly matches the target
+            if np.allclose(actual, target, atol=0.1):
+                exact_matches += 1
         
         actual_counts = np.array(actual_counts)
         mean_actual = np.mean(actual_counts, axis=0)
         mae = np.mean(np.abs(actual_counts - target), axis=0)
+        accuracy = (exact_matches / len(patches)) if patches else 0.0
         
         results[target_str] = {
             'target': target,
             'mean_actual': mean_actual.tolist(),
-            'mae': mae.tolist()
+            'mae': mae.tolist(),
+            'accuracy': accuracy
         }
         all_errors.append(mae)
+        all_exact_matches.append(accuracy)
 
     results['overall'] = {
         'mean_mae': np.mean(all_errors, axis=0).tolist(),
-        'total_mae': np.mean(all_errors)
+        'total_mae': np.mean(all_errors),
+        'accuracy': np.mean(all_exact_matches)
     }
     return results
-
 
 def evaluate_playability(samples: Dict) -> Dict:
     results = {}
@@ -199,21 +208,28 @@ def evaluate_playability(samples: Dict) -> Dict:
 
 def print_comparison_table(name: str, results: Dict):
     print(f"\n--- {name} ---")
-    print(f"{'Target':<12} | {'Actual (Mean)':<20} | {'MAE':<15} | {'Playable'}")
+    print(f"{'Target':<12} | {'Actual (Mean)':<20} | {'MAE':<15} | {'Accuracy':<10} | {'Playable'}")
     for target_str, data in results['controllability'].items():
         if target_str == 'overall': continue
         t = data['target']
         a = data['mean_actual']
         m = data['mae']
+        acc = data['accuracy']
         p = results['playability'][target_str]['playability_rate']
-        print(f"[{t[0]},{t[1]},{t[2]}]".ljust(12) + f" | [{a[0]:.1f},{a[1]:.1f},{a[2]:.1f}]".ljust(20) + f" | [{m[0]:.1f},{m[1]:.1f},{m[2]:.1f}]".ljust(15) + f" | {p:.1%}")
-    print(f"OVERALL MAE: {results['controllability']['overall']['total_mae']:.4f} | Playability: {results['playability']['overall']['playability_rate']:.1%}")
+        print(f"[{t[0]},{t[1]},{t[2]}]".ljust(12) + f" | [{a[0]:.1f},{a[1]:.1f},{a[2]:.1f}]".ljust(20) + f" | [{m[0]:.1f},{m[1]:.1f},{m[2]:.1f}]".ljust(15) + f" | {acc:.1%}    | {p:.1%}")
+    print(f"OVERALL MAE: {results['controllability']['overall']['total_mae']:.4f} | OVERALL ACCURACY: {results['controllability']['overall']['accuracy']:.1%} | Playability: {results['playability']['overall']['playability_rate']:.1%}")
 
 
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    test_targets = [[0,0,0], [3,0,0], [0,3,0], [3,3,3]]
-    samples_per_target = 5 # Small count for speed
+
+    with open('config/eval_config.yaml', 'r') as f:
+        eval_config = yaml.safe_load(f)['evaluation']
+        
+    test_targets = eval_config.get('target_attributes', [[0,0,0], [3,0,0], [0,3,0], [3,3,3]])
+    samples_per_target = eval_config.get('num_samples_per_target', 5)
+    
+    print(f"Loaded {len(test_targets)} targets from eval_config, generating {samples_per_target} samples per target.")
 
     model, sampling_params = load_mamba_model(device)
 

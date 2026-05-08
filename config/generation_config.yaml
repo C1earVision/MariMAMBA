@@ -1,11 +1,11 @@
 generation:
-  attribute_target: [3, 0, 3]  # [enemies, gaps, pipes]
+  attribute_target: [2, 3, 2]  # [enemies, gaps, pipes]
   num_levels: 1
   columns_per_level: 120
-  temperature: 0.8
-  top_k: 30
+  temperature: 0.9
+  top_k: 13 # 13 max
   top_p: 1.5
-  cfg_scale: 1.2
+  cfg_scale: 1.3
 models:
   mamba_path: checkpoints/mamba_best.pth
 output:

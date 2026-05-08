@@ -400,12 +400,23 @@ class Mamba(nn.Module):
             """Scale raw remaining counts to training-window density."""
             if steps_left <= self.max_seq_len:
                 return raw_remaining  # No scaling needed for short sequences
-            scale = self.max_seq_len / steps_left
-            return raw_remaining * scale
+            
+            # Using a square root smooths out the curve so it isn't so tiny at the start.
+            # We also enforce a minimum threshold so the model doesn't completely ignore it early on.
+            linear_scale = self.max_seq_len / steps_left
+            smoothed_scale = linear_scale ** 0.5
+            
+            # Ensure the scaled value is at least 0.5 if we actually have remaining targets
+            # so the model still feels a slight "constant pressure" to place them.
+            scaled = raw_remaining * smoothed_scale
+            scaled = torch.where((raw_remaining > 0) & (scaled < 0.5), torch.tensor(0.5, device=scaled.device), scaled)
+            return scaled
 
         # Initial scaled conditioning
         scaled = _scale_remaining(remaining_counts, num_steps)
         history_counts = [scaled.unsqueeze(1)]
+        
+        pending_pipe_close = None
 
         for i in range(num_steps):
             seq = torch.stack(columns, dim=1)
@@ -429,6 +440,54 @@ class Mamba(nn.Module):
             next_column = self._sample_column(
                 next_logits.squeeze(0), temperature, top_k, top_p
             )
+
+            # --- 100% Probability Pipe Structural Override ---
+            ENABLE_PIPE_OVERRIDE = True
+            if ENABLE_PIPE_OVERRIDE:
+                next_cols = next_column.view(self.columns_per_token, self.column_height)
+                for c in range(self.columns_per_token):
+                    is_closing_pipe = (pending_pipe_close is not None and (pending_pipe_close > 0).any())
+
+                    # 1. Erase orphan right pipe brackets
+                    for h in range(self.column_height):
+                        tile = next_cols[c, h].item()
+                        if tile in [7, 9]:  # '>' or ']'
+                            valid = (is_closing_pipe and pending_pipe_close[h].item() == tile)
+                            if not valid:
+                                # Replace orphan right bracket with ground (0) if bottom rows, else sky (2)
+                                next_cols[c, h] = 0 if h >= 12 else 2
+
+                    # 2. Handle Left Pipe starts vs Right Pipe closes
+                    if is_closing_pipe:
+                        # Erase any randomly generated left pipe pieces in a closing column
+                        for h in range(self.column_height):
+                            if next_cols[c, h].item() in [6, 8] and pending_pipe_close[h].item() == 0:
+                                next_cols[c, h] = 0 if h >= 12 else 2
+                    else:
+                        # Vertical fix: A new left pipe must have EXACTLY ONE '<' followed by '[' downwards
+                        left_pipe_indices = (next_cols[c] == 6) | (next_cols[c] == 8)
+                        if left_pipe_indices.any():
+                            # Find the highest pipe piece
+                            min_h = left_pipe_indices.nonzero(as_tuple=True)[0][0].item()
+                            next_cols[c, min_h] = 6  # Force '<'
+                            # Force '[' downwards until we naturally hit solid ground or block
+                            for h in range(min_h + 1, self.column_height):
+                                if next_cols[c, h].item() in [0, 1]:  # Hit solid ground (0) or breakable block (1)
+                                    break
+                                next_cols[c, h] = 8
+
+                    # 3. Force correct closing brackets
+                    if is_closing_pipe:
+                        mask = pending_pipe_close > 0
+                        next_cols[c][mask] = pending_pipe_close[mask]
+                    
+                    # 4. Check what needs to be closed in the NEXT column
+                    pending_pipe_close = torch.zeros(self.column_height, dtype=torch.long, device=device)
+                    pending_pipe_close[next_cols[c] == 6] = 7  # '<' -> '>'
+                    pending_pipe_close[next_cols[c] == 8] = 9  # '[' -> ']'
+                next_column = next_cols.view(-1)
+            # -------------------------------------------------
+            # ----------------------------------------------
 
             # Update remaining counts
             current_counts = self._count_token_attributes(next_column)

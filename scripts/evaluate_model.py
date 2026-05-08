@@ -66,6 +66,7 @@ def main():
         expand=model_config.expand,
         dropout=0.0,
         max_seq_len=ckpt_max_seq_len,
+        columns_per_token=model_config.columns_per_token,
         num_attributes=3
     ).to(device)
 

@@ -36,13 +36,13 @@ DEFAULT_COLOR = (160, 160, 160)
 
 MAX_JUMP_H   = 5
 MAX_JUMP_W   = 5
-MAX_FIX_ROUNDS = 4     # attempts per stuck column
-MAX_TOTAL_ROUNDS = 20  # hard cap on total LLM calls
+MAX_FIX_ROUNDS = 4
+MAX_TOTAL_ROUNDS = 20
 
 ANTHROPIC_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 ANTHROPIC_MODEL   = "llama-3.1-8b-instant" 
 
-TILE_PX = 16   # pixels per tile in rendered images
+TILE_PX = 16
 
 
 
@@ -155,7 +155,6 @@ def bfs_reachability(grid):
 
 
 def analyze_stuck(grid, visited, stuck_col):
-    """Analyze why Mario is stuck — only reachability / physics problems."""
     h, w = len(grid), len(grid[0])
     problems = []
     look_ahead = min(stuck_col + 12, w - 1)
@@ -300,7 +299,7 @@ def run_fix_pipeline(grid, api_key):
 
     yield {"log": f"Level size: {h} rows × {w} cols"}
 
-    # Initial BFS
+
     yield {"log": "Running initial BFS reachability check…"}
     visited0, path0, sol0, stuck0 = bfs_reachability(grid)
     status = "SOLVABLE" if sol0 else f"NOT SOLVABLE — stuck at col {stuck0}/{w-1}"
@@ -310,7 +309,7 @@ def run_fix_pipeline(grid, api_key):
         "solvable": sol0, "stuck_col": stuck0, "round": 0,
     }
 
-    # If already solvable, nothing to do
+
     if sol0:
         yield {"log": "Level is already solvable. No fixes needed."}
         return
@@ -367,14 +366,14 @@ def run_fix_pipeline(grid, api_key):
         current = apply_window(current, fixed_rows, r0, r1, c0, c1)
         yield {"log": "  Window patch applied."}
 
-        # Show interim grid
+
         v2, p2, s2, sc2 = bfs_reachability(current)
         yield {
             "grid": current, "visited": v2, "path": p2,
             "solvable": s2, "stuck_col": sc2, "round": total_round + 1,
         }
 
-    # Final state
+
     visited_f, path_f, sol_f, stuck_f = bfs_reachability(current)
     changes = sum(
         1 for r in range(h) for c in range(w)
@@ -416,9 +415,9 @@ def get_mamba_model():
             columns_per_token=m_cfg.columns_per_token,
         ).to(_device)
         
-        # Determine checkpoint path
+
         checkpoint_path = t_cfg.save_path.replace('.pth', '_best.pth')
-        # If EMA was requested and exists, use it
+
         ema_path = checkpoint_path.replace('.pth', '_ema.pth')
         if t_cfg.use_ema and os.path.exists(ema_path):
             checkpoint_path = ema_path
@@ -442,9 +441,9 @@ def create_difficulty_schedule(num_columns: int, peak_difficulty: float) -> torc
     """
     num_columns = int(num_columns)
     mid = num_columns // 2
-    # Linear ramp up to mid
+
     ramp_up = torch.linspace(0.0, float(peak_difficulty), int(mid))
-    # Linear ramp down to end
+
     ramp_down = torch.linspace(float(peak_difficulty), 0.0, int(num_columns - mid))
     return torch.cat([ramp_up, ramp_down])
 
@@ -465,7 +464,7 @@ def generate_level(attributes: List[float], patches: int, seed: int | None = Non
         import numpy as np
         np.random.seed(seed)
 
-    # Convert patches to columns (each patch is 16 columns)
+
     num_columns = int(patches * 16)
     
     attr_tensor = torch.tensor(attributes).float().to(_device)
@@ -481,8 +480,8 @@ def generate_level(attributes: List[float], patches: int, seed: int | None = Non
             device=_device
         )
     
-    # Transpose to [H, W] and convert to list of lists of characters
-    level_array = generated_indices.cpu().numpy().T  # [14, W]
+
+    level_array = generated_indices.cpu().numpy().T
     
     grid = []
     for r in range(level_array.shape[0]):
@@ -492,19 +491,21 @@ def generate_level(attributes: List[float], patches: int, seed: int | None = Non
     return grid
 
 
-# ══════════════════════════════════════════════════════════════════════════
-#  RENDERER
-# ══════════════════════════════════════════════════════════════════════════
 
-# Global for lazy loading
+
+
+
+
 _mario_lm_cache = None
 
 def render_level(grid, **kwargs):
     global _mario_lm_cache
     if _mario_lm_cache is None:
+        # pyrefly: ignore [missing-import]
         from mario_gpt import MarioLM
         _mario_lm_cache = MarioLM()
     
+    # pyrefly: ignore [missing-import]
     from mario_gpt.utils import convert_level_to_png
     row_list = ["".join(row) for row in grid]
     img, _, _ = convert_level_to_png(row_list, _mario_lm_cache.tokenizer)

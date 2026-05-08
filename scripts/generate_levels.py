@@ -22,7 +22,7 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# ─── Arguments ───────────────────────────────────────────────────────
+
 arg_parser = argparse.ArgumentParser(description='Generate levels with Mamba')
 arg_parser.add_argument('--attributes', type=str, default=None, help='Comma-separated target counts [enemies, gaps, pipes]')
 arg_parser.add_argument('--temperature', type=float, default=None, help='Sampling temperature')
@@ -42,7 +42,7 @@ print("GENERATING LEVELS (Mamba)")
 print("=" * 70)
 print(f"Device: {device}")
 
-# ─── Load Config ─────────────────────────────────────────────────────
+
 with open('config/generation_config.yaml', 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
@@ -66,15 +66,15 @@ if not model_path:
     model_path = train_cfg.save_path.replace('.pth', '_best.pth')
 output_dir = config['output']['directory']
 
-# ─── Load Model ──────────────────────────────────────────────────────
-# Auto-detect architecture from checkpoint so generation works even if
-# model_config.py has been changed for a new training run.
+
+
+
 raw_ckpt = torch.load(model_path, map_location=device)
 state_dict = raw_ckpt.get('model_state_dict', raw_ckpt)
 
-# Infer d_state from A_log shape: [d_inner, d_state]
+
 ckpt_d_state = state_dict['layers.0.ssm.A_log'].shape[-1]
-# Infer max_seq_len from pos_embedding shape: [1, max_seq_len, d_model]
+
 ckpt_max_seq_len = state_dict['pos_embedding'].shape[1]
 
 if ckpt_d_state != m_cfg.d_state or ckpt_max_seq_len != m_cfg.max_seq_len:
@@ -102,7 +102,7 @@ model.load_state_dict(state_dict)
 model.eval()
 print("Mamba model loaded")
 
-# ─── Generate Levels ─────────────────────────────────────────────────
+
 generated_levels = []
 
 for level_idx in range(num_levels):
@@ -114,15 +114,15 @@ for level_idx in range(num_levels):
     print(f"  Temperature: {temperature}, Top-k: {top_k}, Top-p: {top_p}")
     print(f"  CFG scale: {cfg_scale}")
 
-    # For dynamic counts, we pass the initial target as a single vector
-    # The model's generate() method will handle the decrementing
+
+
     attr_tensor = torch.tensor(attribute_target).to(device)
     
-    # Generate columns
+
     generated_columns = model.generate(
         num_columns=columns_per_level,
         attributes=attr_tensor,
-        initial_column=None,  # Default ground floor
+        initial_column=None,
         temperature=temperature,
         top_k=top_k,
         top_p=top_p,
@@ -130,19 +130,19 @@ for level_idx in range(num_levels):
         device=device,
     )
 
-    # generated_columns: [num_columns, H] -> transpose to [H, num_columns]
-    level_array = generated_columns.cpu().numpy().T  # [H, W]
+
+    level_array = generated_columns.cpu().numpy().T
 
     print(f"Generated level shape: {level_array.shape}")
 
-    # Decode to text
+
     level_str = parser.decode_level(level_array)
     print(f"\n--- Generated Level {level_idx + 1} ---")
     print(level_str)
 
     generated_levels.append((level_str, level_array))
 
-# ─── Save Results ────────────────────────────────────────────────────
+
 print(f"\n{'='*70}")
 print(f"GENERATION COMPLETE! Generated {len(generated_levels)} levels")
 print(f"{'='*70}")
@@ -150,13 +150,13 @@ print(f"{'='*70}")
 os.makedirs(output_dir, exist_ok=True)
 
 for i, (level_str, level_array) in enumerate(generated_levels):
-    # Save text
+
     txt_path = os.path.join(output_dir, f'column_level_{i+1}.txt')
     with open(txt_path, 'w') as f:
         f.write(level_str)
     print(f'Saved level {i+1} text to {txt_path}')
 
-    # Save PNG
+
     png_path = os.path.join(output_dir, f'column_level_{i+1}.png')
     save_level_image(level_array, png_path, tile_size=16)
     print(f'Saved level {i+1} image to {png_path}')

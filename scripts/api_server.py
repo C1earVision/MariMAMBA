@@ -8,15 +8,15 @@ import os
 from dotenv import load_dotenv
 import sys
 
-# Load environment variables from .env file
+
 load_dotenv()
 
-# Add project root to path so we can import internal modules
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from map_fixer_system.map_fixer import generate_level, bfs_reachability
 
-# Default GROQ key from environment
+
 DEFAULT_GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 app = FastAPI(
@@ -24,7 +24,7 @@ app = FastAPI(
     description="REST API to generate Mario levels using a Conditional Mamba model."
 )
 
-# --- Data Models ---
+
 
 class AttributeParams(BaseModel):
     enemies: int = 2
@@ -54,25 +54,23 @@ class GenerationResponse(BaseModel):
     fix_rounds: int = 0
     generation_time_ms: float
 
-# --- Endpoints ---
+
 
 @app.post("/generate", response_model=GenerationResponse)
 async def generate(request: GenerationRequest):
-    """
-    Generates a Mario level based on the provided attribute targets and parameters.
-    """
+    
     start_time = time.time()
     
     try:
-        # 1. Map request to internal attributes list [enemies, gaps, pipes]
+
         attr_list = [
             float(request.attributes.enemies),
             float(request.attributes.gaps),
             float(request.attributes.pipes)
         ]
         
-        # 2. Run Mamba Generation
-        # Each 'patch' in generate_level is 16 columns
+
+
         grid = generate_level(
             attributes=attr_list,
             patches=request.params.num_columns / 16.0,
@@ -83,14 +81,14 @@ async def generate(request: GenerationRequest):
             cfg_scale=request.params.cfg_scale
         )
         
-        # 3. Handle Map Fixing if requested
+
         final_grid = grid
         is_solvable = False
         fixed_status = False
         rounds_taken = 0
         
         if request.api_key and request.api_key.strip():
-            # Run the fix pipeline (it's a generator)
+
             print("Running Map Fixing Pipeline...")
             from map_fixer_system.map_fixer import run_fix_pipeline
             
@@ -106,10 +104,10 @@ async def generate(request: GenerationRequest):
                 rounds_taken = last_state["round"]
                 fixed_status = rounds_taken > 0
         else:
-            # No API key provided, just check initial solvability
+
             _, _, is_solvable, _ = bfs_reachability(grid)
         
-        # 4. Prepare level string
+
         level_string = "\n".join(["".join(row) for row in final_grid])
         
         end_time = time.time()
@@ -131,10 +129,10 @@ async def generate(request: GenerationRequest):
 
 @app.get("/health")
 async def health():
-    """Health check endpoint to verify the server is running."""
+    
     return {"status": "ready", "model": "Conditional-Mamba-Mario-v1"}
 
 if __name__ == "__main__":
     print("Starting Mamba Mario API Server...")
-    # Run on all interfaces (0.0.0.0) so it's accessible from other devices if needed
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

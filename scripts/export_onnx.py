@@ -24,23 +24,23 @@ def try_export():
         d_state=m_cfg.d_state,
         d_conv=m_cfg.d_conv,
         expand=m_cfg.expand,
-        dropout=0.0, # Dropout should be 0 for export
+        dropout=0.0,
         max_seq_len=m_cfg.max_seq_len,
         num_attributes=m_cfg.num_attributes,
         columns_per_token=m_cfg.columns_per_token
     )
 
-    # 2. Load weights (if available)
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Use the 'best' checkpoint path automatically
+
     checkpoint_path = train_cfg.save_path.replace('.pth', '_best.pth')
     
     if os.path.exists(checkpoint_path):
         print(f"Loading weights from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        # Check if it's a state dict or a wrapped dict
+
         state_dict = checkpoint.get("model_state_dict", checkpoint)
-        # Clean state dict (remove 'module.' prefix if it exists)
+
         new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(new_state_dict, strict=False)
     else:
@@ -48,9 +48,9 @@ def try_export():
     
     model.eval()
 
-    # 3. Create dummy inputs
+
     batch_size = 1
-    seq_len = m_cfg.max_seq_len # Use configured max length for export
+    seq_len = m_cfg.max_seq_len
     column_sequence = torch.randint(
         0, m_cfg.num_tile_types, 
         (batch_size, seq_len, m_cfg.column_height * m_cfg.columns_per_token)
@@ -62,7 +62,7 @@ def try_export():
     output_file = checkpoint_path.replace('.pth', '.onnx')
     
     try:
-        # Using the legacy exporter (dynamo=False) for better stability
+
         torch.onnx.export(
             model,
             (column_sequence, attribute_sequence),

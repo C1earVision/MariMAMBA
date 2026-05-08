@@ -81,11 +81,11 @@ class MambaBlock(nn.Module):
 
         self.norm = nn.LayerNorm(d_model)
 
-        # FiLM layers: predict scale (gamma) and shift (beta) from attribute embedding
+
         self.film_gamma = nn.Linear(d_model, d_model)
         self.film_beta = nn.Linear(d_model, d_model)
         
-        # Initialize FiLM to identity (gamma=1, beta=0)
+
         nn.init.ones_(self.film_gamma.weight)
         nn.init.zeros_(self.film_gamma.bias)
         nn.init.zeros_(self.film_beta.weight)
@@ -108,17 +108,13 @@ class MambaBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, attr_emb: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: [B, L, D]
-            attr_emb: [B, L, D] or [B, D]
-        """
+        
         residual = x
         x = self.norm(x)
 
-        # Apply FiLM modulation
-        gamma = self.film_gamma(attr_emb) # [B, L, D]
-        beta = self.film_beta(attr_emb)   # [B, L, D]
+
+        gamma = self.film_gamma(attr_emb)
+        beta = self.film_beta(attr_emb)
         x = x * gamma + beta
 
         xz = self.in_proj(x)
@@ -165,9 +161,9 @@ class ColumnEncoder(nn.Module):
         )
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        # tokens: [B, L, H_eff] where H_eff = column_height * columns_per_token
+
         B, L, Heff = tokens.shape
-        tile_embs = self.tile_embedding(tokens) # [B, L, Heff, tile_embed_dim]
+        tile_embs = self.tile_embedding(tokens)
         flat = tile_embs.reshape(B, L, Heff * self.tile_embed_dim)
         return self.projection(flat)
 
@@ -194,7 +190,7 @@ class ColumnDecoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, L, D = x.shape
         out = self.head(x)
-        # Reshape to [B, L, K*H, num_tile_types]
+
         return out.reshape(B, L, self.column_height * self.columns_per_token, self.num_tile_types)
 
 
@@ -225,13 +221,13 @@ class Mamba(nn.Module):
         self.max_seq_len = max_seq_len
         self.num_attributes = num_attributes
         
-        # Attribute mappings: {attr_idx: [tile_indices]}
-        # If None, use defaults for Mario
+
+
         if attribute_mappings is None:
             self.attribute_mappings = {
-                0: [5],     # Enemies: E only
-                1: [2],     # Gaps: - (check bottom)
-                2: [8],     # Pipes: [ (one per pipe)
+                0: [5],
+                1: [2],
+                2: [8],
             }
         else:
             self.attribute_mappings = attribute_mappings
@@ -283,7 +279,7 @@ class Mamba(nn.Module):
             columns_per_token=columns_per_token,
         )
 
-        # Attribute predictor for auxiliary loss
+
         self.attribute_predictor = nn.Sequential(
             nn.Linear(d_model, d_model),
             nn.SiLU(),
@@ -331,7 +327,7 @@ class Mamba(nn.Module):
         col_emb = self.column_encoder(column_sequence)
         attr_emb = self.attribute_embedding(attribute_sequence)
 
-        # Combined initial input
+
         x = torch.cat([col_emb, attr_emb], dim=-1)
         x = self.input_proj(x)
 
@@ -339,14 +335,14 @@ class Mamba(nn.Module):
         x = self.drop_emb(x)
 
         for layer in self.layers:
-            # Pass attr_emb to each block for FiLM modulation
+
             x = layer(x, attr_emb)
 
         x = self.output_norm(x)
 
         logits = self.column_decoder(x)
         
-        # Predict attributes from hidden state for auxiliary loss
+
         pred_attrs = self.attribute_predictor(x)
 
         return logits, pred_attrs
@@ -367,52 +363,52 @@ class Mamba(nn.Module):
         self.eval()
 
         if initial_column is None:
-            # Token shape: [1, K * H]
+
             initial_column = torch.full(
                 (1, self.columns_per_token * self.column_height), 2, dtype=torch.long, device=device
             )  
-            # Set the bottom tile of the last column in the token to 0 (Ground)
+
             initial_column[0, -1] = 0
         else:
             initial_column = initial_column.to(device).long()
             if initial_column.dim() == 1:
                 initial_column = initial_column.unsqueeze(0)
 
-        # target_attrs shape: [B, K] - the total counts requested
+
         target_attrs = attributes.to(device).float()
         if target_attrs.dim() == 1:
             target_attrs = target_attrs.unsqueeze(0)
         
-        # We'll maintain a list of current "remaining counts" for each step
-        # starting with the target
+
+
         remaining_counts = target_attrs.clone()
 
         columns = [initial_column]
 
-        # Target steps: if columns_per_token is 2, we generate half the number of steps
+
         num_steps = max(1, num_columns // self.columns_per_token)
 
-        # Density scaling: the model was trained on windows of max_seq_len columns.
-        # remaining=2 in training means "2 items in ~max_seq_len columns."
-        # During generation of num_steps columns, we scale so the model sees
-        # the expected count within its learned window size, not the total.
+
+
+
+
         def _scale_remaining(raw_remaining, steps_left):
-            """Scale raw remaining counts to training-window density."""
-            if steps_left <= self.max_seq_len:
-                return raw_remaining  # No scaling needed for short sequences
             
-            # Using a square root smooths out the curve so it isn't so tiny at the start.
-            # We also enforce a minimum threshold so the model doesn't completely ignore it early on.
+            if steps_left <= self.max_seq_len:
+                return raw_remaining
+            
+
+
             linear_scale = self.max_seq_len / steps_left
             smoothed_scale = linear_scale ** 0.5
             
-            # Ensure the scaled value is at least 0.5 if we actually have remaining targets
-            # so the model still feels a slight "constant pressure" to place them.
+
+
             scaled = raw_remaining * smoothed_scale
             scaled = torch.where((raw_remaining > 0) & (scaled < 0.5), torch.tensor(0.5, device=scaled.device), scaled)
             return scaled
 
-        # Initial scaled conditioning
+
         scaled = _scale_remaining(remaining_counts, num_steps)
         history_counts = [scaled.unsqueeze(1)]
         
@@ -441,73 +437,73 @@ class Mamba(nn.Module):
                 next_logits.squeeze(0), temperature, top_k, top_p
             )
 
-            # --- 100% Probability Pipe Structural Override ---
+
             ENABLE_PIPE_OVERRIDE = True
             if ENABLE_PIPE_OVERRIDE:
                 next_cols = next_column.view(self.columns_per_token, self.column_height)
                 for c in range(self.columns_per_token):
                     is_closing_pipe = (pending_pipe_close is not None and (pending_pipe_close > 0).any())
 
-                    # 1. Erase orphan right pipe brackets
+
                     for h in range(self.column_height):
                         tile = next_cols[c, h].item()
-                        if tile in [7, 9]:  # '>' or ']'
+                        if tile in [7, 9]:
                             valid = (is_closing_pipe and pending_pipe_close[h].item() == tile)
                             if not valid:
-                                # Replace orphan right bracket with ground (0) if bottom rows, else sky (2)
+
                                 next_cols[c, h] = 0 if h >= 12 else 2
 
-                    # 2. Handle Left Pipe starts vs Right Pipe closes
+
                     if is_closing_pipe:
-                        # Erase any randomly generated left pipe pieces in a closing column
+
                         for h in range(self.column_height):
                             if next_cols[c, h].item() in [6, 8] and pending_pipe_close[h].item() == 0:
                                 next_cols[c, h] = 0 if h >= 12 else 2
                     else:
-                        # Vertical fix: A new left pipe must have EXACTLY ONE '<' followed by '[' downwards
+
                         left_pipe_indices = (next_cols[c] == 6) | (next_cols[c] == 8)
                         if left_pipe_indices.any():
-                            # Find the highest pipe piece
+
                             min_h = left_pipe_indices.nonzero(as_tuple=True)[0][0].item()
-                            next_cols[c, min_h] = 6  # Force '<'
-                            # Force '[' downwards until we naturally hit solid ground or block
+                            next_cols[c, min_h] = 6
+
                             for h in range(min_h + 1, self.column_height):
-                                if next_cols[c, h].item() in [0, 1]:  # Hit solid ground (0) or breakable block (1)
+                                if next_cols[c, h].item() in [0, 1]:
                                     break
                                 next_cols[c, h] = 8
 
-                    # 3. Force correct closing brackets
+
                     if is_closing_pipe:
                         mask = pending_pipe_close > 0
                         next_cols[c][mask] = pending_pipe_close[mask]
                     
-                    # 4. Check what needs to be closed in the NEXT column
-                    pending_pipe_close = torch.zeros(self.column_height, dtype=torch.long, device=device)
-                    pending_pipe_close[next_cols[c] == 6] = 7  # '<' -> '>'
-                    pending_pipe_close[next_cols[c] == 8] = 9  # '[' -> ']'
-                next_column = next_cols.view(-1)
-            # -------------------------------------------------
-            # ----------------------------------------------
 
-            # Update remaining counts
+                    pending_pipe_close = torch.zeros(self.column_height, dtype=torch.long, device=device)
+                    pending_pipe_close[next_cols[c] == 6] = 7
+                    pending_pipe_close[next_cols[c] == 8] = 9
+                next_column = next_cols.view(-1)
+
+
+
+
             current_counts = self._count_token_attributes(next_column)
             remaining_counts = (remaining_counts - current_counts).clamp(min=0)
 
-            # Scale for the model's conditioning window
+
             steps_left = num_steps - (i + 1)
             scaled = _scale_remaining(remaining_counts, max(steps_left, 1))
 
             columns.append(next_column.unsqueeze(0))
             history_counts.append(scaled.unsqueeze(1))
 
-        # [num_steps, K * H]
+
         generated_tokens = torch.stack([c.squeeze(0) for c in columns[1:]], dim=0)
-        # Reshape back to individual columns [num_columns, H]
+
         generated = generated_tokens.reshape(-1, self.column_height)
         return generated
 
     def _count_token_attributes(self, token: torch.Tensor) -> torch.Tensor:
-        """Count attributes in a multi-column token."""
+        
         K = self.columns_per_token
         H = self.column_height
         columns = token.reshape(K, H)
@@ -518,14 +514,14 @@ class Mamba(nn.Module):
         return total_counts
 
     def _count_column_attributes(self, column: torch.Tensor) -> torch.Tensor:
-        """Count attributes in a single generated column."""
+        
         counts = torch.zeros(self.num_attributes, device=column.device)
         
         for attr_idx, tile_indices in self.attribute_mappings.items():
-            if attr_idx == 1:  # Gaps: check bottom row only
+            if attr_idx == 1:
                 if column[-1] in tile_indices:
                     counts[attr_idx] = 1.0
-            else:  # Enemies, Pipes: check any tile in column
+            else:
                 for t_idx in tile_indices:
                     if any(column == t_idx):
                         counts[attr_idx] = 1.0

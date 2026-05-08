@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import glob
 import random
+# pyrefly: ignore [missing-import]
 import optuna
 from torch.utils.data import DataLoader
 
@@ -22,13 +23,13 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# Global Setup
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 parser = LevelParser()
 model_config = MambaConfig()
 base_train_config = MambaTrainingConfig()
 
-# 1. Load Data (Once)
+
 raw_data = []
 for filepath in sorted(glob.glob("./dataset/*.txt")):
     with open(filepath, "r") as file:
@@ -57,17 +58,17 @@ train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
 val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
 
 def objective(trial):
-    # 2. Suggest Hyperparameters
+
     lr = trial.suggest_float("learning_rate", 1e-5, 5e-4, log=True)
     weight_decay = trial.suggest_float("weight_decay", 0.01, 0.4)
     ema_decay = trial.suggest_float("ema_decay", 0.9, 0.9999)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
     
-    # 3. Create DataLoaders
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # 4. Initialize Model (Fresh for each trial)
+
     model = Mamba(
         num_tile_types=model_config.num_tile_types,
         column_height=model_config.column_height,
@@ -83,7 +84,7 @@ def objective(trial):
         columns_per_token=model_config.columns_per_token,
     ).to(device)
 
-    # 5. Initialize Trainer
+
     trainer = MambaTrainer(
         model=model,
         learning_rate=lr,
@@ -91,18 +92,17 @@ def objective(trial):
         device=device
     )
     
-    # Override EMA decay
+
     trainer.ema.decay = ema_decay
 
-    # 6. Train with limited epochs for optimization (or full with pruning)
-    # Using 100 epochs for HPO (original is 400)
+
+
     best_val_loss = trainer.train(
         train_loader=train_loader,
         val_loader=val_loader,
         num_epochs=100, 
-        save_interval=1000, # Don't save often during HPO
+        save_interval=1000,
         save_path=f'checkpoints/hpo_trial_{trial.number}.pth',
-        trial=trial
     )
 
     return best_val_loss
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     for key, value in study.best_params.items():
         print(f"    {key}: {value}")
     
-    # Save results
+
     os.makedirs('output/hpo', exist_ok=True)
     import pandas as pd
     study.trials_dataframe().to_csv('output/hpo/optuna_results.csv', index=False)

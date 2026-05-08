@@ -77,7 +77,7 @@ class PatchDifficultyEvaluator:
 
 
     def _count_obstacles(self, patch):
-        """Count obstacle groups + floating platforms (ground not on bottom)"""
+        
         height, width = patch.shape
         
         OBSTACLE_TILES = {
@@ -115,7 +115,7 @@ class PatchDifficultyEvaluator:
                         group.append((r, c))
                         stack.extend([(r+1, c), (r-1, c), (r, c+1), (r, c-1)])
                     
-                    # If no tile in group is on bottom row, it's a floating platform
+
                     if group and not any(r == height - 1 for r, c in group):
                         obstacle_count += 1
         
@@ -149,10 +149,10 @@ class PatchDifficultyEvaluator:
         pipes = self._count_pipes(patch)
         jumps = gaps
         
-        # Weighted composite difficulty score
-        enemy_score = min(enemies / 4.0, 1.0)       # 4+ enemies → max
-        gap_score = min(gaps / 3.0, 1.0)             # 3+ gaps → max
-        obstacle_score = min(obstacles / 5.0, 1.0)   # 5+ obstacles → max
+
+        enemy_score = min(enemies / 4.0, 1.0)
+        gap_score = min(gaps / 3.0, 1.0)
+        obstacle_score = min(obstacles / 5.0, 1.0)
 
         diff_score = (
             0.40 * enemy_score +

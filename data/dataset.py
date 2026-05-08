@@ -24,27 +24,27 @@ class ColumnSequenceDataset(Dataset):
         
         self.sequences = []
         
-        # Define tile mappings for attribute counting
-        # [enemies, gaps, pipes]
+
+
         self.enemy_tiles = {parser.tile_to_idx[t] for t in ['E'] if t in parser.tile_to_idx}
         self.pipe_tiles = {parser.tile_to_idx[t] for t in ['['] if t in parser.tile_to_idx}
         self.empty_tile = parser.tile_to_idx['-']
 
         for level_idx, level in enumerate(levels):
             H, W = level.shape
-            columns = level.T  # [W, H] 
-            level_attrs = self._get_level_attributes(columns) # [W, 3]
+            columns = level.T
+            level_attrs = self._get_level_attributes(columns)
 
-            # Group columns into tokens
+
             K = self.columns_per_token
             num_tokens = W // K
             if num_tokens < 2:
                 continue
             
-            # Reshape to [num_tokens, K*H]
-            # Each "token" is now K columns concatenated
+
+
             tokenized_columns = torch.from_numpy(columns[:num_tokens * K]).reshape(num_tokens, K * H).long()
-            # Group attributes by summing them over the K columns
+
             tokenized_attrs = torch.from_numpy(level_attrs[:num_tokens * K]).reshape(num_tokens, K, 3).sum(dim=1)
 
             W_tok = num_tokens
@@ -58,8 +58,8 @@ class ColumnSequenceDataset(Dataset):
                 chunk_cols = tokenized_columns[start:end]
                 chunk_attrs = tokenized_attrs[start:end]
 
-                # Compute "Remaining Counts"
-                # remaining_counts[t] is sum of attributes from t to end of chunk
+
+
                 remaining_counts = torch.flip(torch.cumsum(torch.flip(chunk_attrs, dims=[0]), dim=0), dims=[0])
                 
                 input_seq = chunk_cols[:-1]
@@ -95,15 +95,15 @@ class ColumnSequenceDataset(Dataset):
         
         for i in range(W):
             col = columns[i]
-            # Enemies
+
             if any(tile in self.enemy_tiles for tile in col):
                 attrs[i, 0] = 1.0
             
-            # Gaps: each column without ground counts as 1
+
             if col[H-1] == self.empty_tile:
                 attrs[i, 1] = 1.0
             
-            # Pipes
+
             if any(tile in self.pipe_tiles for tile in col):
                 attrs[i, 2] = 1.0
                 

@@ -13,7 +13,7 @@ mamba_config = MambaTrainingConfig()
 
 
 class EMA:
-    """Exponential Moving Average for model weights."""
+    
 
     def __init__(self, model: nn.Module, decay: float = 0.9999):
         self.decay = decay
@@ -72,9 +72,9 @@ class MambaTrainer:
             weight_decay=weight_decay
         )
 
-        # Per-tile cross entropy (reduction='none' for masking)
+
         self.criterion = nn.CrossEntropyLoss(reduction='none')
-        # L1 loss for attribute prediction (more stable than MSE for counting)
+
         self.attr_criterion = nn.L1Loss(reduction='none')
 
         if self.use_ema:
@@ -100,29 +100,19 @@ class MambaTrainer:
         print(f"{'='*70}\n")
 
     def _masked_column_ce(self, predicted, target, seq_lens):
-        """
-        Compute masked cross-entropy over column predictions.
         
-        Args:
-            predicted: [B, L, H, C] logits
-            target: [B, L, H] tile indices
-            seq_lens: [B] actual sequence lengths
-            
-        Returns:
-            Scalar loss
-        """
         B, L, H, C = predicted.shape
 
-        # Reshape for cross entropy: [B*L*H, C] vs [B*L*H]
+
         per_tile = self.criterion(
             predicted.reshape(-1, C),
             target.reshape(-1)
         ).reshape(B, L, H)
 
-        # Average over tiles in column: [B, L]
+
         per_column = per_tile.mean(dim=-1)
 
-        # Mask padding columns
+
         mask = torch.zeros(B, L, device=predicted.device)
         for i in range(B):
             mask[i, :seq_lens[i]] = 1.0
@@ -132,26 +122,19 @@ class MambaTrainer:
         return loss
 
     def _masked_attr_loss(self, predicted_attrs, target_attrs, seq_lens):
-        """
-        Compute masked L1 loss for attribute prediction.
         
-        Args:
-            predicted_attrs: [B, L, num_attributes]
-            target_attrs: [B, L, num_attributes]
-            seq_lens: [B]
-        """
         B, L, K = predicted_attrs.shape
         
-        # Scale attributes to keep loss in a reasonable range
+
         scale = 0.3
         
-        # L1 loss: [B, L, K]
+
         l1_error = self.attr_criterion(predicted_attrs * scale, target_attrs * scale)
         
-        # Mean over attributes: [B, L]
+
         per_step = l1_error.mean(dim=-1)
         
-        # Masking
+
         mask = torch.zeros(B, L, device=predicted_attrs.device)
         for i in range(B):
             mask[i, :seq_lens[i]] = 1.0
@@ -169,20 +152,20 @@ class MambaTrainer:
         target_cols = target_cols.to(self.device).long()
         seq_lens = seq_lens.to(self.device).long()
 
-        # CFG Masking
+
         true_cond_seq = cond_seq.clone()
         drop_mask = torch.rand(input_cols.shape[0], device=self.device) < 0.15
         cond_seq[drop_mask] = -1.0
 
         predicted_logits, predicted_attrs = self.model(input_cols, cond_seq)
         
-        # 1. Standard Cross Entropy Loss (ALL samples — needed for CFG)
+
         ce_loss = self._masked_column_ce(predicted_logits, target_cols, seq_lens)
         
-        # 2. Auxiliary Attribute Loss (ONLY conditioned samples)
-        # Dropped samples have no attribute info in their hidden states,
-        # so including them creates an impossible prediction task that
-        # plateaus at the dataset-mean error.
+
+
+
+
         keep_mask = ~drop_mask
         if keep_mask.any():
             attr_loss = self._masked_attr_loss(
@@ -193,7 +176,7 @@ class MambaTrainer:
         else:
             attr_loss = torch.tensor(0.0, device=self.device)
         
-        # Total Loss
+
         total_loss = ce_loss + self.attr_loss_weight * attr_loss
 
         self.optimizer.zero_grad()

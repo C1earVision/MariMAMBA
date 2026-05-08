@@ -10,6 +10,7 @@ from models.mamba import Mamba
 from evaluation.astar_agent import AStarAgent
 from data.parser import LevelParser
 from config.model_config import MambaConfig
+# pyrefly: ignore [missing-import]
 from mario_gpt import MarioLM
 
 def load_mamba_model(device: str) -> tuple:
@@ -36,7 +37,7 @@ def load_mamba_model(device: str) -> tuple:
     model.load_state_dict(mamba_checkpoint['model_state_dict'])
     model.eval()
 
-    # Load sampling params
+
     sampling_params = {
         'temperature': gen_config['generation'].get('temperature', 0.8),
         'cfg_scale': gen_config['generation'].get('cfg_scale', 2.0),
@@ -48,10 +49,7 @@ def load_mamba_model(device: str) -> tuple:
 
 
 def count_attributes_in_patch(patch: np.ndarray, model: Mamba) -> List[float]:
-    """
-    Count total attributes in a generated patch.
-    patch: [H, W] array of tile indices
-    """
+    
     total_counts = np.zeros(3)
     device = next(model.parameters()).device
     for col_idx in range(patch.shape[1]):
@@ -130,11 +128,11 @@ def generate_mariogpt_samples(
         prompt = target_to_mariogpt_prompt(target)
         
         print(f"MarioGPT sampling for: {prompt}")
-        # MarioGPT generates strings, we need to parse them to indices
-        # We'll use a local parser to match indices
+
+
         parser = LevelParser()
         
-        # We generate one by one to avoid OOM or complex batching
+
         for _ in tqdm(range(samples_per_target), desc=f"MarioGPT {target_str}"):
             out = mario_lm.sample(
                 prompts=[prompt],
@@ -142,9 +140,9 @@ def generate_mariogpt_samples(
                 temperature=0.8,
                 use_tqdm=False
             )
-            # out is a SampleOutput object
+
             level_str = out.level[0]
-            # Convert string to indices [H, W]
+
             level_array = parser.parse_level_list(level_str.split('\n'))
             results[target_str].append(level_array)
             
@@ -164,7 +162,7 @@ def evaluate_controllability(samples: Dict, model: Mamba) -> Dict:
         for patch in patches:
             actual = count_attributes_in_patch(patch, model)
             actual_counts.append(actual)
-            # Check if actual perfectly matches the target
+
             if np.allclose(actual, target, atol=0.1):
                 exact_matches += 1
         
@@ -233,21 +231,21 @@ if __name__ == '__main__':
 
     model, sampling_params = load_mamba_model(device)
 
-    # 1. Our Model (Guided)
+
     mamba_guided_samples = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, sampling_params['cfg_scale'], device, "Mamba (Guided)")
     mamba_guided_res = {
         'controllability': evaluate_controllability(mamba_guided_samples, model),
         'playability': evaluate_playability(mamba_guided_samples)
     }
 
-    # 2. Our Model (No Guidance)
+
     mamba_null_samples = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, 1.0, device, "Mamba (Null)")
     mamba_null_res = {
         'controllability': evaluate_controllability(mamba_null_samples, model),
         'playability': evaluate_playability(mamba_null_samples)
     }
 
-    # 3. MarioGPT
+
     mariogpt_samples = generate_mariogpt_samples(test_targets, samples_per_target, device)
     mariogpt_res = {
         'controllability': evaluate_controllability(mariogpt_samples, model),
@@ -261,7 +259,7 @@ if __name__ == '__main__':
     print_comparison_table("Mamba (No Guidance/Baseline)", mamba_null_res)
     print_comparison_table("MarioGPT (Text Prompts)", mariogpt_res)
     
-    # Save a comparison plot
+
     names = ["Mamba (Guided)", "Mamba (Null)", "MarioGPT"]
     maes = [mamba_guided_res['controllability']['overall']['total_mae'], 
             mamba_null_res['controllability']['overall']['total_mae'],

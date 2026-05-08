@@ -23,7 +23,7 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 def count_attributes(patch: np.ndarray, model: Mamba) -> np.ndarray:
-    """Count total attributes in a generated patch [H, W]."""
+    
     total_counts = np.zeros(3)
     device = next(model.parameters()).device
     for col_idx in range(patch.shape[1]):

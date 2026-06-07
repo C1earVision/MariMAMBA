@@ -129,4 +129,4 @@ MariMAMBA achieves nearly **10x higher accuracy** in following specific feature 
 ---
 
 ## Contributors
-https://github.com/MohamedAly532005
+https://github.com/moaazaldakar

@@ -128,7 +128,5 @@ MariMAMBA achieves nearly **10x higher accuracy** in following specific feature 
 
 ---
 
-## 🤝 Acknowledgments
-- **Mamba (SSM)**: "Mamba: Linear-Time Sequence Modeling with Selective State Spaces."
-- **MarioGPT**: For the foundation of tile-based level representation.
-- **Graduation Project**: Developed as part of a University Graduation Project focusing on Advanced Agentic AI in Game Design.
+## Contributors
+https://github.com/MohamedAly532005

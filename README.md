@@ -130,3 +130,11 @@ MariMAMBA achieves nearly **10x higher accuracy** in following specific feature 
 
 ## Contributors
 https://github.com/moaazaldakar --> Created The Map Fixer System
+
+## License
+MIT License
+
+Copyright (c) 2026 Ahmed Ebrahim (C1earVision)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files...

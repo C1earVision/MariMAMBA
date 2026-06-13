@@ -128,7 +128,13 @@ MariMAMBA achieves nearly **10x higher accuracy** in following specific feature 
 
 ---
 
-## 🤝 Acknowledgments
-- **Mamba (SSM)**: "Mamba: Linear-Time Sequence Modeling with Selective State Spaces."
-- **MarioGPT**: For the foundation of tile-based level representation.
-- **Graduation Project**: Developed as part of a University Graduation Project focusing on Advanced Agentic AI in Game Design.
+## Contributors
+https://github.com/moaazaldakar --> Created The Map Fixer System
+
+## License
+MIT License
+
+Copyright (c) 2026 Ahmed Ebrahim (C1earVision)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files...

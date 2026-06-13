@@ -1,7 +1,7 @@
 generation:
   attribute_target: [2, 3, 2]  # [enemies, gaps, pipes]
   num_levels: 1
-  columns_per_level: 120
+  columns_per_level: 90
   temperature: 0.9
   top_k: 13 # 13 max
   top_p: 1.5

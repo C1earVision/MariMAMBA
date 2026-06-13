@@ -486,7 +486,9 @@ class Mamba(nn.Module):
 
 
 
-            current_counts = self._count_token_attributes(next_column)
+            prev_token = columns[-1].squeeze(0)
+            prev_column = prev_token[-self.column_height:]
+            current_counts = self._count_token_attributes(next_column, prev_column=prev_column)
             remaining_counts = (remaining_counts - current_counts).clamp(min=0)
 
 
@@ -502,7 +504,7 @@ class Mamba(nn.Module):
         generated = generated_tokens.reshape(-1, self.column_height)
         return generated
 
-    def _count_token_attributes(self, token: torch.Tensor) -> torch.Tensor:
+    def _count_token_attributes(self, token: torch.Tensor, prev_column: Optional[torch.Tensor] = None) -> torch.Tensor:
         
         K = self.columns_per_token
         H = self.column_height
@@ -510,17 +512,19 @@ class Mamba(nn.Module):
         
         total_counts = torch.zeros(self.num_attributes, device=token.device)
         for i in range(K):
-            total_counts += self._count_column_attributes(columns[i])
+            col_prev = prev_column if i == 0 else columns[i-1]
+            total_counts += self._count_column_attributes(columns[i], col_prev)
         return total_counts
 
-    def _count_column_attributes(self, column: torch.Tensor) -> torch.Tensor:
+    def _count_column_attributes(self, column: torch.Tensor, prev_column: Optional[torch.Tensor] = None) -> torch.Tensor:
         
         counts = torch.zeros(self.num_attributes, device=column.device)
         
         for attr_idx, tile_indices in self.attribute_mappings.items():
             if attr_idx == 1:
-                if column[-1] in tile_indices:
-                    counts[attr_idx] = 1.0
+                if column[-1].item() in tile_indices:
+                    if prev_column is None or prev_column[-1].item() not in tile_indices:
+                        counts[attr_idx] = 1.0
             else:
                 for t_idx in tile_indices:
                     if any(column == t_idx):

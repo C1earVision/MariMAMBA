@@ -383,11 +383,11 @@ with gr.Blocks(title="Mario Level Studio") as demo:
                 label="Pipes (Target Count)",
             )
             temperature = gr.Slider(
-                minimum=0.1, maximum=2.0, step=0.1, value=0.8,
+                minimum=0.1, maximum=2.0, step=0.1, value=0.9,
                 label="Temperature  (higher=more random)",
             )
             top_k = gr.Slider(
-                minimum=0, maximum=100, step=1, value=30,
+                minimum=0, maximum=100, step=1, value=13,
                 label="Top-K  (0=disabled)",
             )
             top_p = gr.Slider(

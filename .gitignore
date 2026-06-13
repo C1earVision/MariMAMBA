@@ -37,3 +37,6 @@ wheels/
 # IDEs
 .vscode/
 .idea/
+
+# Graduation Project Paper
+Paper/

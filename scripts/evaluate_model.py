@@ -28,7 +28,12 @@ def count_attributes(patch: np.ndarray, model: Mamba) -> np.ndarray:
     device = next(model.parameters()).device
     for col_idx in range(patch.shape[1]):
         column = patch[:, col_idx]
-        col_attrs = model._count_column_attributes(torch.from_numpy(column).to(device))
+        prev_column = patch[:, col_idx - 1] if col_idx > 0 else None
+        
+        col_tensor = torch.from_numpy(column).to(device)
+        prev_tensor = torch.from_numpy(prev_column).to(device) if prev_column is not None else None
+        
+        col_attrs = model._count_column_attributes(col_tensor, prev_tensor)
         total_counts += col_attrs.cpu().numpy()
     return total_counts
 

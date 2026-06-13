@@ -101,7 +101,8 @@ class ColumnSequenceDataset(Dataset):
             
 
             if col[H-1] == self.empty_tile:
-                attrs[i, 1] = 1.0
+                if i == 0 or columns[i-1][H-1] != self.empty_tile:
+                    attrs[i, 1] = 1.0
             
 
             if any(tile in self.pipe_tiles for tile in col):

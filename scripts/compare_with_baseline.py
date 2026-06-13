@@ -1,5 +1,6 @@
 import torch
 import yaml
+import time
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -54,7 +55,12 @@ def count_attributes_in_patch(patch: np.ndarray, model: Mamba) -> List[float]:
     device = next(model.parameters()).device
     for col_idx in range(patch.shape[1]):
         column = patch[:, col_idx]
-        col_attrs = model._count_column_attributes(torch.from_numpy(column).to(device))
+        prev_column = patch[:, col_idx - 1] if col_idx > 0 else None
+        
+        col_tensor = torch.from_numpy(column).to(device)
+        prev_tensor = torch.from_numpy(prev_column).to(device) if prev_column is not None else None
+        
+        col_attrs = model._count_column_attributes(col_tensor, prev_tensor)
         total_counts += col_attrs.cpu().numpy()
     return total_counts.tolist()
 
@@ -67,9 +73,10 @@ def generate_mamba_samples(
     cfg_scale: float,
     device: str,
     desc: str
-) -> Dict:
+) -> Tuple[Dict, float]:
     results = {}
     patch_width = 32
+    times = []
     
     for target in targets:
         target_str = str(target)
@@ -78,6 +85,7 @@ def generate_mamba_samples(
         attr_tensor = torch.tensor(target).float().to(device)
         
         for _ in tqdm(range(samples_per_target), desc=f"{desc} {target_str}"):
+            start_time = time.time()
             with torch.no_grad():
                 generated_columns = model.generate(
                     num_columns=patch_width,
@@ -88,10 +96,14 @@ def generate_mamba_samples(
                     cfg_scale=cfg_scale,
                     device=device,
                 )
+                if device == 'cuda':
+                    torch.cuda.synchronize()
+                times.append(time.time() - start_time)
                 patch = generated_columns.cpu().numpy().T
                 results[target_str].append(patch)
                 
-    return results
+    avg_time = sum(times) / len(times) if times else 0.0
+    return results, avg_time
 
 
 def target_to_mariogpt_prompt(target: List[int]) -> str:
@@ -116,11 +128,12 @@ def generate_mariogpt_samples(
     targets: List[List[int]],
     samples_per_target: int,
     device: str
-) -> Dict:
+) -> Tuple[Dict, float]:
     print("\nLoading MarioGPT Baseline...")
     mario_lm = MarioLM().to(device)
     results = {}
     patch_width = 32
+    times = []
     
     for target in targets:
         target_str = str(target)
@@ -129,24 +142,27 @@ def generate_mariogpt_samples(
         
         print(f"MarioGPT sampling for: {prompt}")
 
-
         parser = LevelParser()
         
-
         for _ in tqdm(range(samples_per_target), desc=f"MarioGPT {target_str}"):
+            start_time = time.time()
             out = mario_lm.sample(
                 prompts=[prompt],
                 num_steps=patch_width,
                 temperature=0.8,
                 use_tqdm=False
             )
+            if device == 'cuda':
+                torch.cuda.synchronize()
+            times.append(time.time() - start_time)
 
             level_str = out.level[0]
 
             level_array = parser.parse_level_list(level_str.split('\n'))
             results[target_str].append(level_array)
             
-    return results
+    avg_time = sum(times) / len(times) if times else 0.0
+    return results, avg_time
 
 
 def evaluate_controllability(samples: Dict, model: Mamba) -> Dict:
@@ -216,6 +232,8 @@ def print_comparison_table(name: str, results: Dict):
         p = results['playability'][target_str]['playability_rate']
         print(f"[{t[0]},{t[1]},{t[2]}]".ljust(12) + f" | [{a[0]:.1f},{a[1]:.1f},{a[2]:.1f}]".ljust(20) + f" | [{m[0]:.1f},{m[1]:.1f},{m[2]:.1f}]".ljust(15) + f" | {acc:.1%}    | {p:.1%}")
     print(f"OVERALL MAE: {results['controllability']['overall']['total_mae']:.4f} | OVERALL ACCURACY: {results['controllability']['overall']['accuracy']:.1%} | Playability: {results['playability']['overall']['playability_rate']:.1%}")
+    if 'avg_time' in results:
+        print(f"Average Inference Time per Sample: {results['avg_time']:.4f} seconds")
 
 
 if __name__ == '__main__':
@@ -232,24 +250,27 @@ if __name__ == '__main__':
     model, sampling_params = load_mamba_model(device)
 
 
-    mamba_guided_samples = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, sampling_params['cfg_scale'], device, "Mamba (Guided)")
+    mamba_guided_samples, mamba_guided_time = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, sampling_params['cfg_scale'], device, "Mamba (Guided)")
     mamba_guided_res = {
         'controllability': evaluate_controllability(mamba_guided_samples, model),
-        'playability': evaluate_playability(mamba_guided_samples)
+        'playability': evaluate_playability(mamba_guided_samples),
+        'avg_time': mamba_guided_time
     }
 
 
-    mamba_null_samples = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, 1.0, device, "Mamba (Null)")
+    mamba_null_samples, mamba_null_time = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, 1.0, device, "Mamba (Null)")
     mamba_null_res = {
         'controllability': evaluate_controllability(mamba_null_samples, model),
-        'playability': evaluate_playability(mamba_null_samples)
+        'playability': evaluate_playability(mamba_null_samples),
+        'avg_time': mamba_null_time
     }
 
 
-    mariogpt_samples = generate_mariogpt_samples(test_targets, samples_per_target, device)
+    mariogpt_samples, mariogpt_time = generate_mariogpt_samples(test_targets, samples_per_target, device)
     mariogpt_res = {
         'controllability': evaluate_controllability(mariogpt_samples, model),
-        'playability': evaluate_playability(mariogpt_samples)
+        'playability': evaluate_playability(mariogpt_samples),
+        'avg_time': mariogpt_time
     }
 
     print("\n" + "="*80)
@@ -267,15 +288,25 @@ if __name__ == '__main__':
     plays = [mamba_guided_res['playability']['overall']['playability_rate'],
              mamba_null_res['playability']['overall']['playability_rate'],
              mariogpt_res['playability']['overall']['playability_rate']]
+    times = [mamba_guided_res['avg_time'],
+             mamba_null_res['avg_time'],
+             mariogpt_res['avg_time']]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
     ax1.bar(names, maes, color=['blue', 'gray', 'green'], alpha=0.7)
-    ax1.set_title('Overall Controllability (Lower is Better)')
+    ax1.set_title('Overall Controllability (Lower is Better)', fontsize=11, fontweight='bold')
     ax1.set_ylabel('Mean Absolute Error (MAE)')
+    ax1.grid(True, axis='y', alpha=0.3)
     
     ax2.bar(names, plays, color=['blue', 'gray', 'green'], alpha=0.7)
-    ax2.set_title('Overall Playability (Higher is Better)')
+    ax2.set_title('Overall Playability (Higher is Better)', fontsize=11, fontweight='bold')
     ax2.set_ylabel('Playability Rate')
+    ax2.grid(True, axis='y', alpha=0.3)
+
+    ax3.bar(names, times, color=['blue', 'gray', 'green'], alpha=0.7)
+    ax3.set_title('Inference Generation Time (Lower is Better)', fontsize=11, fontweight='bold')
+    ax3.set_ylabel('Avg Time per Sample (seconds)')
+    ax3.grid(True, axis='y', alpha=0.3)
     
     plt.tight_layout()
     plt.savefig('output/visualizations/baseline_comparison.png')

@@ -124,13 +124,18 @@ def target_to_mariogpt_prompt(target: List[int]) -> str:
     return ", ".join(prompts)
 
 
+def load_mariogpt_model(device: str):
+    print("\nLoading MarioGPT Baseline...")
+    mario_lm = MarioLM().to(device)
+    return mario_lm
+
+
 def generate_mariogpt_samples(
+    mario_lm,
     targets: List[List[int]],
     samples_per_target: int,
     device: str
 ) -> Tuple[Dict, float]:
-    print("\nLoading MarioGPT Baseline...")
-    mario_lm = MarioLM().to(device)
     results = {}
     patch_width = 32
     times = []
@@ -236,6 +241,78 @@ def print_comparison_table(name: str, results: Dict):
         print(f"Average Inference Time per Sample: {results['avg_time']:.4f} seconds")
 
 
+def benchmark_mamba_time_vs_length(
+    model: Mamba,
+    sampling_params: Dict,
+    cfg_scale: float,
+    level_lengths: List[int],
+    num_trials: int,
+    device: str,
+    desc: str
+) -> List[float]:
+    """Measure average Mamba inference time to generate levels of varying lengths."""
+    avg_times = []
+    dummy_target = torch.tensor([1.0, 1.0, 1.0]).to(device)
+
+    for length in level_lengths:
+        times = []
+        for _ in tqdm(range(num_trials), desc=f"{desc} (length={length})"):
+            start_time = time.time()
+            with torch.no_grad():
+                model.generate(
+                    num_columns=length,
+                    attributes=dummy_target,
+                    temperature=sampling_params['temperature'],
+                    top_k=sampling_params['top_k'],
+                    top_p=sampling_params['top_p'],
+                    cfg_scale=cfg_scale,
+                    device=device,
+                )
+                if device == 'cuda':
+                    torch.cuda.synchronize()
+            times.append(time.time() - start_time)
+        avg_times.append(sum(times) / len(times) if times else 0.0)
+
+    return avg_times
+
+
+def benchmark_mariogpt_time_vs_length(
+    mario_lm,
+    level_lengths: List[int],
+    num_trials: int,
+    device: str
+) -> List[float]:
+    """Measure average MarioGPT inference time for varying level lengths (num_steps)."""
+    avg_times = []
+    prompt = "no enemies, no gaps, no pipes"
+
+    for length in level_lengths:
+        times = []
+        for _ in tqdm(range(num_trials), desc=f"MarioGPT Timing (length={length})"):
+            start_time = time.time()
+            mario_lm.sample(
+                prompts=[prompt],
+                num_steps=length,
+                temperature=0.8,
+                use_tqdm=False
+            )
+            if device == 'cuda':
+                torch.cuda.synchronize()
+            times.append(time.time() - start_time)
+        avg_times.append(sum(times) / len(times) if times else 0.0)
+
+    return avg_times
+
+
+def print_time_vs_length_table(level_lengths: List[int], timing_results: Dict[str, List[float]]):
+    print(f"\n--- Inference Generation Time (s) vs. Level Length ---")
+    header = f"{'Level Length':<14}" + "".join(f"{name:<20}" for name in timing_results.keys())
+    print(header)
+    for i, length in enumerate(level_lengths):
+        row = f"{length:<14}" + "".join(f"{timing_results[name][i]:<20.4f}" for name in timing_results.keys())
+        print(row)
+
+
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -244,10 +321,13 @@ if __name__ == '__main__':
         
     test_targets = eval_config.get('target_attributes', [[0,0,0], [3,0,0], [0,3,0], [3,3,3]])
     samples_per_target = eval_config.get('num_samples_per_target', 5)
-    
+    level_lengths = eval_config.get('level_lengths_to_test', [8, 16, 32, 64, 128, 256, 512, 768, 1024])
+    timing_trials = eval_config.get('num_timing_trials', 3)
+
     print(f"Loaded {len(test_targets)} targets from eval_config, generating {samples_per_target} samples per target.")
 
     model, sampling_params = load_mamba_model(device)
+    mario_lm = load_mariogpt_model(device)
 
 
     mamba_guided_samples, mamba_guided_time = generate_mamba_samples(model, test_targets, samples_per_target, sampling_params, sampling_params['cfg_scale'], device, "Mamba (Guided)")
@@ -266,7 +346,7 @@ if __name__ == '__main__':
     }
 
 
-    mariogpt_samples, mariogpt_time = generate_mariogpt_samples(test_targets, samples_per_target, device)
+    mariogpt_samples, mariogpt_time = generate_mariogpt_samples(mario_lm, test_targets, samples_per_target, device)
     mariogpt_res = {
         'controllability': evaluate_controllability(mariogpt_samples, model),
         'playability': evaluate_playability(mariogpt_samples),
@@ -279,6 +359,17 @@ if __name__ == '__main__':
     print_comparison_table("Mamba (Conditional + CFG)", mamba_guided_res)
     print_comparison_table("Mamba (No Guidance/Baseline)", mamba_null_res)
     print_comparison_table("MarioGPT (Text Prompts)", mariogpt_res)
+
+    print("\n" + "="*80)
+    print(f"{'INFERENCE TIME vs. LEVEL LENGTH':^80}")
+    print("="*80)
+    print(f"Benchmarking level lengths {level_lengths} with {timing_trials} trials each.")
+    timing_results = {
+        'Mamba (Guided)': benchmark_mamba_time_vs_length(model, sampling_params, sampling_params['cfg_scale'], level_lengths, timing_trials, device, "Mamba (Guided)"),
+        'Mamba (Null)': benchmark_mamba_time_vs_length(model, sampling_params, 1.0, level_lengths, timing_trials, device, "Mamba (Null)"),
+        'MarioGPT': benchmark_mariogpt_time_vs_length(mario_lm, level_lengths, timing_trials, device)
+    }
+    print_time_vs_length_table(level_lengths, timing_results)
     
 
     names = ["Mamba (Guided)", "Mamba (Null)", "MarioGPT"]
@@ -311,3 +402,17 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig('output/visualizations/baseline_comparison.png')
     print(f"\nComparison plot saved to output/visualizations/baseline_comparison.png")
+
+    fig2, ax4 = plt.subplots(figsize=(8, 5))
+    colors = {'Mamba (Guided)': 'blue', 'Mamba (Null)': 'gray', 'MarioGPT': 'green'}
+    for series_name, series_times in timing_results.items():
+        ax4.plot(level_lengths, series_times, marker='o', label=series_name, color=colors.get(series_name))
+    ax4.set_title('Inference Generation Time vs. Level Length', fontsize=11, fontweight='bold')
+    ax4.set_xlabel('Level Length (columns)')
+    ax4.set_ylabel('Avg Time per Sample (seconds)')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig('output/visualizations/time_vs_length_comparison.png')
+    print(f"\nTime vs. Length plot saved to output/visualizations/time_vs_length_comparison.png")

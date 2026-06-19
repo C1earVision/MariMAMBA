@@ -28,7 +28,7 @@ class LevelParser:
     def parse_level_list(self, level_lines: List[str]) -> np.ndarray:
         parsed_rows = []
         for row in level_lines:
-            parsed_row = [self.tile_to_idx[char] for char in row.strip()]
+            parsed_row = [self.tile_to_idx[char if char in self.tile_to_idx else char.upper()] for char in row.strip()]
             parsed_rows.append(parsed_row)
         level_array = np.array(parsed_rows, dtype=np.int32)
         return level_array

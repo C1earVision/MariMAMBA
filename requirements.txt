@@ -1,5 +1,4 @@
 # ── Runtime: packages needed to run the Gradio demo ─────────────────────────
-# (Also what Hugging Face Spaces installs)
 
 # Core ML
 torch>=2.0.0
@@ -18,3 +17,15 @@ requests>=2.28.0
 
 # Gradio UI
 gradio==6.12.0
+
+# Training loop progress bars
+tqdm>=4.65.0
+
+# Loss curve plotting (used by mamba_trainer.py and evaluate_model.py)
+matplotlib>=3.7.0
+
+# Config parsing in evaluate_model.py
+pyyaml>=6.0
+
+# Hyperparameter optimization (scripts/optimize_mamba.py)
+optuna>=3.0.0

@@ -496,20 +496,106 @@ def generate_level(attributes: List[float], patches: int, seed: int | None = Non
 
 
 
+
+_TITLE_H = 22          # pixels for title bar
 _mario_lm_cache = None
 
-def render_level(grid, **kwargs):
+
+def _get_mario_lm():
+    """Lazy-load MarioLM once and cache it."""
     global _mario_lm_cache
     if _mario_lm_cache is None:
-        # pyrefly: ignore [missing-import]
-        from mario_gpt import MarioLM
+        from mario_gpt import MarioLM          # noqa: PLC0415
         _mario_lm_cache = MarioLM()
-    
-    # pyrefly: ignore [missing-import]
-    from mario_gpt.utils import convert_level_to_png
-    row_list = ["".join(row) for row in grid]
-    img, _, _ = convert_level_to_png(row_list, _mario_lm_cache.tokenizer)
-    return img
+    return _mario_lm_cache
+
+
+def render_level(grid, visited=None, path=None, stuck_col=None, title="", px=16, **kwargs):
+    """
+    Hybrid renderer:
+      1. MarioGPT's convert_level_to_png for authentic tile sprites.
+      2. PIL overlays for BFS visited (green tint), solution path (white dots),
+         stuck column (orange stripe), and a title bar.
+    Falls back to pure-PIL on any MarioGPT import error.
+    """
+    h = len(grid)
+    w = len(grid[0])
+
+    # ── Try MarioGPT base render ────────────────────────────────────────────
+    base_img = None
+    tile_px   = px          # actual tile size in the base image
+    try:
+        from mario_gpt.utils import convert_level_to_png   # noqa: PLC0415
+        mario_lm  = _get_mario_lm()
+        row_list  = ["".join(row) for row in grid]
+        base_img, _, _ = convert_level_to_png(row_list, mario_lm.tokenizer)
+        # convert_level_to_png always produces 16-px tiles
+        tile_px = base_img.width // w if w > 0 else 16
+    except Exception:
+        base_img = None   # fall through to PIL fallback
+
+    # ── Build canvas (with optional title bar) ──────────────────────────────
+    title_h = _TITLE_H if title else 0
+    canvas_w = (base_img.width  if base_img else w * tile_px)
+    canvas_h = (base_img.height if base_img else h * tile_px) + title_h
+
+    canvas = Image.new("RGB", (canvas_w, canvas_h), (22, 26, 36))
+
+    if title:
+        from PIL import ImageDraw as _ID, ImageFont as _IF  # noqa: PLC0415
+        _d = _ID.Draw(canvas)
+        _d.rectangle([0, 0, canvas_w, title_h - 1], fill=(30, 35, 50))
+        try:
+            _font = _IF.truetype("DejaVuSansMono.ttf", 11)
+        except Exception:
+            _font = _IF.load_default()
+        _d.text((6, 4), title, fill=(255, 200, 80), font=_font)
+
+    # Paste base image below the title bar
+    if base_img:
+        canvas.paste(base_img, (0, title_h))
+    else:
+        # Pure-PIL fallback: draw solid tile colours
+        _d2 = ImageDraw.Draw(canvas)
+        for r in range(h):
+            for c in range(w):
+                color = TILE_COLORS.get(grid[r][c], DEFAULT_COLOR)
+                x0, y0 = c * tile_px, r * tile_px + title_h
+                _d2.rectangle([x0, y0, x0 + tile_px - 1, y0 + tile_px - 1], fill=color)
+
+    # ── PIL overlays ────────────────────────────────────────────────────────
+    overlay = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    draw    = ImageDraw.Draw(overlay)
+
+    path_set = set(map(tuple, path))    if path    else set()
+    vis_set  = set(map(tuple, visited)) if visited else set()
+
+    for r in range(h):
+        for c in range(w):
+            x0 = c * tile_px
+            y0 = r * tile_px + title_h
+
+            # Green tint — BFS-reachable cells
+            if (r, c) in vis_set:
+                draw.rectangle([x0, y0, x0 + tile_px - 1, y0 + tile_px - 1],
+                               fill=(0, 200, 60, 60))
+
+            # Orange stripe — stuck column
+            if stuck_col is not None and c == stuck_col:
+                draw.rectangle([x0, y0, x0 + tile_px - 1, y0 + tile_px - 1],
+                               fill=(255, 120, 0, 100))
+
+            # White dot — solution path
+            if (r, c) in path_set:
+                cr, cy = x0 + tile_px // 2, y0 + tile_px // 2
+                r2 = max(2, tile_px // 4)
+                draw.ellipse([cr - r2, cy - r2, cr + r2, cy + r2],
+                             fill=(255, 255, 255, 220))
+
+    canvas = canvas.convert("RGBA")
+    canvas.alpha_composite(overlay)
+    return canvas.convert("RGB")
+
 
 
 def count_tile_changes(original, fixed):

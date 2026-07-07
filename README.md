@@ -1,3 +1,15 @@
+---
+title: MariMAMBA Level Studio
+emoji: 🍄
+colorFrom: yellow
+colorTo: red
+sdk: gradio
+sdk_version: 6.12.0
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # 🍄 MariMAMBA: Multi-Attribute Conditional Mamba for Level Generation
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)

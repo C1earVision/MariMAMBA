@@ -13,10 +13,13 @@ license: mit
 
 # 🍄 MariMAMBA: Multi-Attribute Conditional Mamba for Level Generation
 
+[![IEEE Xplore](https://img.shields.io/badge/IEEE-Xplore-00629B.svg)](https://ieeexplore.ieee.org/document/11602791)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/pytorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> 🎓 **Published in IEEE Xplore**: [https://ieeexplore.ieee.org/document/11602791](https://ieeexplore.ieee.org/document/11602791)
+>
 > **A high-precision level generation system using Selective State Space Models (Mamba) with multi-attribute controllability.**
 
 MariMAMBA is a deep learning framework designed to generate playable, high-quality Super Mario Bros levels. By leveraging the **Mamba (SSM)** architecture with **FiLM (Feature-wise Linear Modulation)**, the system achieves fine-grained control over specific level features like enemy density, gap frequency, and pipe counts, outperforming transformer-based baselines in instruction adherence.
